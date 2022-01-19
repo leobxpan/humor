@@ -83,7 +83,7 @@ def gen_data_npz(x_pred_dict, meta, actual_t, end_idx, cano_rot_inv, dest_npz_pa
     # new_cano_rot_mat_arr: T X 4 X 4 
     from body_model.body_model import BodyModel
     from body_model.utils import SMPLH_PATH
- 
+
     new_trans = x_pred_dict['trans'][0, :end_idx][-actual_t:] # T X 3
     new_trans_vel= x_pred_dict['trans_vel'][0, :end_idx][-actual_t:] # T X 3
     new_root_orient = x_pred_dict['root_orient'][0, :end_idx][-actual_t:] # T X 9 
@@ -167,7 +167,7 @@ def test(args_obj, config_file):
     loss_file = class_name_to_file_name(args.loss)
     model_file_path = os.path.join(pkg_root, 'models/' + model_file + '.py')
     train_file_path = os.path.join(pkg_root, 'test/test_humor.py')
-    cp_files(test_scripts_path, [train_file_path, model_file_path, dataset_file_path, config_file])
+    # cp_files(test_scripts_path, [train_file_path, model_file_path, dataset_file_path, config_file])
 
     # load model class and instantiate
     model_class = importlib.import_module('models.' + model_file)
@@ -263,15 +263,13 @@ def test(args_obj, config_file):
             test_dataset.pre_batch()
 
     house_region_index_dict = {
-                        #"17DRP5sb8fy": [0, 7, 8],
-                        "17DRP5sb8fy": [7, 8],
+                        "17DRP5sb8fy": [0, 7, 8],
                         "sKLMLpTHeUy": [1],
                         "X7HyMhZNoso": [16],
                         "zsNo4HB9uLZ": [0, 13],
                         }
     house_region_name_dict = {
-                        #"17DRP5sb8fy": ["bedroom", "livingroom", "familyroomlounge"],
-                        "17DRP5sb8fy": ["livingroom", "familyroomlounge"],
+                        "17DRP5sb8fy": ["bedroom", "livingroom", "familyroomlounge"],
                         "sKLMLpTHeUy": ["familyname_0_1"],
                         "X7HyMhZNoso": ["livingroom_0_16"],
                         "zsNo4HB9uLZ": ["bedroom0_0", "livingroom0_13"],
