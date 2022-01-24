@@ -3,6 +3,7 @@ import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
+import argparse
 import importlib, time
 
 import json
@@ -291,7 +292,8 @@ def test(args_obj, config_file):
                                 viz_contacts=args.viz_contacts,
                                 viz_pred_joints=args.viz_pred_joints,
                                 viz_smpl_joints=args.viz_smpl_joints,
-                                write_obj=args.write_obj)
+                                write_obj=args.write_obj, 
+                                save_seq_len=args.seq_len)
 
     Logger.log('Finished!')
 
@@ -302,7 +304,8 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                   viz_contacts=False,
                   viz_pred_joints=False,
                   viz_smpl_joints=False,
-                  write_obj=False):
+                  write_obj=False,
+                  save_seq_len=None):
     Logger.log('Evaluating sampling qualitatively...')
     from body_model.body_model import BodyModel
     from body_model.utils import SMPLH_PATH
@@ -409,9 +412,12 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
               
                 if len(valid_verts_list) == eval_qual_samp_len:
                     end_idx = eval_qual_samp_len
-               
-                seq_len = end_idx
-                #seq_len = 30
+
+                if save_seq_len:
+                    seq_len = save_seq_len
+                else:
+                    seq_len = end_idx
+
                 if len(valid_verts_list) >= min_seq_len: 
                     # If longer than minimum sequence length, save motion sequence and collision supervision
                     valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
@@ -557,4 +563,5 @@ def main(args, config_file):
 if __name__=='__main__':
     args = parse_args(sys.argv[1:])
     config_file = sys.argv[1:][0][1:]
+
     main(args, config_file)

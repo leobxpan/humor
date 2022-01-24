@@ -165,6 +165,7 @@ class TestConfig(BaseConfig):
         self.parser.set_defaults(viz_smpl_joints=False)
         self.parser.add_argument('--write-obj', dest='write_obj', action='store_true', help="Saves .obj files for body mesh locally.")
         self.parser.add_argument('--house-name', dest='house_name', type=str, required=True, help='House name that the current process handles.')
+        self.parser.add_argument('--seq-len', dest='seq_len', type=int, default=None, help="saves the last seq_len length of sequences. if None then save all.")
 
 #
 # Edit/add configs here for changes to model-specific arguments.
