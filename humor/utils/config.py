@@ -166,6 +166,7 @@ class TestConfig(BaseConfig):
         self.parser.add_argument('--write-obj', dest='write_obj', action='store_true', help="Saves .obj files for body mesh locally.")
         self.parser.add_argument('--house-name', dest='house_name', type=str, required=True, help='House name that the current process handles.')
         self.parser.add_argument('--seq-len', dest='seq_len', type=int, default=None, help="saves the last seq_len length of sequences. if None then save all.")
+        self.parser.add_argument('--num-batches', dest='num_batches', type=int, default=500, help="number of batches run for each (house_name, region_name) tuple (not the number that are actually saved)")
 
 #
 # Edit/add configs here for changes to model-specific arguments.

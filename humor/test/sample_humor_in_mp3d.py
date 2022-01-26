@@ -218,10 +218,15 @@ def test(args_obj, config_file):
     elif args.test_on_val:
         split = 'val'
     test_dataset = Dataset(split=split, **args_obj.dataset_dict)
+
+    # only select a subset of data
+    subset_indices = np.random.choice(len(test_dataset), size=args.num_batches, replace=False)
+    subset_sampler = torch.utils.data.SubsetRandomSampler(subset_indices)
     # create loaders
     test_loader = DataLoader(test_dataset, 
                             batch_size=args.batch_size,
-                            shuffle=args.shuffle_test, 
+                            shuffle=False,
+                            sampler=subset_sampler,
                             num_workers=NUM_WORKERS,
                             pin_memory=True,
                             drop_last=False,
