@@ -167,7 +167,8 @@ class TestConfig(BaseConfig):
         self.parser.add_argument('--house-name', dest='house_name', type=str, required=True, help='House name that the current process handles.')
         self.parser.add_argument('--seq-len', dest='seq_len', type=int, default=None, help="saves the last seq_len length of sequences. if None then save all.")
         self.parser.add_argument('--num-batches', dest='num_batches', type=int, default=500, help="number of batches run for each (house_name, region_name) tuple (not the number that are actually saved)")
-
+        self.parser.add_argument('--debug', action='store_true')
+        self.parser.add_argument('--dataset-type', dest='dataset_type', type=str, default="nomap_22", choices=["nomap_22", "map_10"])
 #
 # Edit/add configs here for changes to model-specific arguments.
 # NOTE: must be named ModelNameConfig to be properly loaded. Also should not clash names with any Base/Train/Test configuration flags.

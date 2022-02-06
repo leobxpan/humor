@@ -50,7 +50,7 @@ def write_to_obj(dest_obj_file, vertices, faces):
 
     w_f.close() 
 
-def check_if_valid(vertices, sdf, grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight):
+def check_if_valid(vertices, sdf, grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight, floor_z_max=-1e3):
     # vertices: bs(1) X N X 3
     # Compute scene penetration using signed distance field (SDF)
     sdf_penetration_loss = 0.0
@@ -60,21 +60,35 @@ def check_if_valid(vertices, sdf, grid_min, grid_max, grid_dim, voxel_size, sdf_
         (vertices.squeeze() - grid_min) / voxel_size).to(dtype=torch.long)
     sdf_ids.clamp_(min=0, max=grid_dim-1)
 
+    verts_above_floor_inds = (vertices[:, :, -1] > floor_z_max).squeeze()              # vertices that should be considered for collision check
+    verts_in_floor_inds = ~verts_above_floor_inds
+    #vertices = vertices[:, verts_above_floor_inds, :]
+
     norm_vertices = (vertices - grid_min) / (grid_max - grid_min) * 2 - 1 # normalize to range(-1, 1)
 
     body_sdf = F.grid_sample(sdf.view(1, 1, grid_dim, grid_dim, grid_dim),
                                 norm_vertices[:, :, [2, 1, 0]].view(1, nv, 1, 1, 3),
                                 #norm_vertices.view(1, nv, 1, 1, 3),
-                                padding_mode='border')
-   
+                                padding_mode='border').squeeze()
+  
     # if there are no penetrating vertices then set sdf_penetration_loss = 0
-    if body_sdf.lt(0).sum().item() < 1:
+    if body_sdf[verts_above_floor_inds].lt(0).sum().item() < 1:
         sdf_penetration_loss = torch.tensor(0.0, dtype=vertices.dtype, device=vertices.device)
     else:
-        sdf_penetration_loss = sdf_penetration_weight * body_sdf[body_sdf < 0].abs().sum()
+        sdf_penetration_loss = sdf_penetration_weight * body_sdf[verts_above_floor_inds][body_sdf[verts_above_floor_inds] < 0].abs().sum()
 
     in_penetration = (body_sdf < 0)
+    in_penetration[verts_in_floor_inds] = False
     return sdf_penetration_loss, in_penetration
+
+def reject_outliers(data, m = 2., return_idx=False):
+    d = np.abs(data - np.median(data))
+    mdev = np.median(d)
+    s = d/mdev if mdev else 0.
+    if return_idx:
+        return data[s<m], s<m
+    else:
+        return data[s<m]
 
 def gen_data_npz(x_pred_dict, meta, actual_t, end_idx, cano_rot_inv, dest_npz_path):
     # x_pred_dict: contains data in the canonical frame of the first frame's pose. 
@@ -268,6 +282,12 @@ def test(args_obj, config_file):
 
             test_dataset.pre_batch()
 
+    metadata = {
+        "dataset_type": args.dataset_type,
+    }
+    with open(os.path.join(args.out, "metadata.json"), "w") as f:
+        json.dump(metadata, f)
+
     house_region_index_dict = {
                         "17DRP5sb8fy": [0, 7, 8],
                         "sKLMLpTHeUy": [1],
@@ -298,7 +318,9 @@ def test(args_obj, config_file):
                                 viz_pred_joints=args.viz_pred_joints,
                                 viz_smpl_joints=args.viz_smpl_joints,
                                 write_obj=args.write_obj, 
-                                save_seq_len=args.seq_len)
+                                save_seq_len=args.seq_len,
+                                debug=args.debug,
+                                dataset_type=args.dataset_type)
 
     Logger.log('Finished!')
 
@@ -310,7 +332,9 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                   viz_pred_joints=False,
                   viz_smpl_joints=False,
                   write_obj=False,
-                  save_seq_len=None):
+                  save_seq_len=None,
+                  debug=False,
+                  dataset_type="nomap_22"):
     Logger.log('Evaluating sampling qualitatively...')
     from body_model.body_model import BodyModel
     from body_model.utils import SMPLH_PATH
@@ -381,7 +405,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                 x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device))
 
                 # translate the human to the scene
-                x_pred_dict = translate_to_scene(x_pred_dict, house_name, region_index)
+                x_pred_dict, floor_z_max = translate_to_scene(x_pred_dict, house_name, region_index, return_floor=True)
 
                 # visualize and save
                 print('Visualizing sample %d/%d!' % (samp_idx+1, num_samples))
@@ -404,7 +428,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                 end_idx = 0                           # the index till where is the valid sequence
                 for f_idx in range(eval_qual_samp_len):
                     penetration_loss, in_penetration = check_if_valid(human_verts[f_idx: f_idx + 1], sdf, grid_min, grid_max, grid_dim, \
-                        voxel_size, sdf_penetration_weight)
+                        voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
 
                     #print("penetration loss:", penetration_loss)
                     if penetration_loss > penetration_loss_threshold:
@@ -437,7 +461,14 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                         # no collision happening in this sequence
                         penetration_label = torch.tensor([100], device=device) 
                     else:
-                        penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx])
+                        if debug:
+                            penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True)
+                            verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
+                            np.save(verts_path, verts_in_penetration.cpu().numpy())
+                        else:
+                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False)
+
+                    penetration_label = process_label(penetration_label, dataset_type)
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
 
@@ -445,7 +476,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                     cano_rot_inv = torch.eye(4).to(x_past.device)
                     gen_data_npz(x_pred_dict, meta, seq_len, end_idx, cano_rot_inv, dest_npz_path)
 
-def translate_to_scene(x_pred_dict, house_name, region_index):
+def translate_to_scene(x_pred_dict, house_name, region_index, return_floor=False):
     """Translate the human location to a random location on the floor."""
     scene_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/scans/" + house_name
     region_dir = os.path.join(scene_dir, "region_segmentations")
@@ -465,19 +496,86 @@ def translate_to_scene(x_pred_dict, house_name, region_index):
     x_pred_dict['trans'][..., :] += torch.Tensor([rand_vertex_x, rand_vertex_y, rand_vertex_z]).to(x_pred_dict['trans'].device)
     x_pred_dict['joints'] = x_pred_dict['joints'].view(x_pred_dict['joints'].shape[0], x_pred_dict['joints'].shape[1], -1, 3)
     x_pred_dict['joints'] += torch.Tensor([rand_vertex_x, rand_vertex_y, rand_vertex_z]).to(x_pred_dict['joints'].device)
-    
-    return x_pred_dict
+   
+    if return_floor:
+        floor_z = region_ply['vertex']['z'][floor_vertex_ids]
+        inliers_z = reject_outliers(floor_z)
+        floor_z_max = inliers_z.max()
+        
+        return x_pred_dict, floor_z_max
+    else:
+        return x_pred_dict
 
-def process_penetration(in_penetration, vertices, joints, counts_thresh=100):
-    verts_in_penetration = vertices[in_penetration == True, :]
+def process_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False):
+    verts_in_penetration = vertices[in_penetration, :]
     verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
     penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
-    penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
+    unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
 
-    mask = counts >= counts_thresh
-    penetration_joints = torch.masked_select(penetration_joints, mask)
+    joints_mask = counts >= counts_thresh
+    unique_penetration_joints = torch.masked_select(unique_penetration_joints, joints_mask)
+    verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
 
-    return penetration_joints
+    if debug:
+        return unique_penetration_joints, verts_in_penetration[verts_mask]
+    else:
+        return unique_penetration_joints
+
+def process_label(penetration_label, dataset_type="nomap_22"):
+    """
+    Cluster penetration label to only a few important joints.
+    """
+
+    if dataset_type == "nomap_22":
+        return penetration_label
+    elif dataset_type == "map_10":
+        mapping_dict = {
+            0 : 0,
+            1 : 0,
+            2 : 0,
+            3 : 0,
+            6 : 0,
+            9 : 0,
+            13: 0,
+            14: 0,
+            16: 0,
+            17: 0,
+            18: 1,
+            19: 2,
+            20: 3,
+            21: 4,
+            12: 5,
+            15: 5,
+            4 : 6,
+            5 : 7,
+            7 : 8,
+            10: 8,
+            8 : 9,
+            11: 9,
+            100: 100,
+        }
+
+        joint_ind_to_name_dict = {
+            0 : "torso",
+            1 : "leftForeArm",
+            2 : "rightForeArm",
+            3 : "leftHand",
+            4 : "rightHand",
+            5 : "head",
+            6 : "leftLeg",
+            7 : "rightLeg",
+            8 : "leftFoot",
+            9 : "rightFoot",
+            100: "noCollision"
+        }
+
+        mapped_penetration_label = [mapping_dict[orig_label.item()] for orig_label in penetration_label]
+        mapped_penetration_label = torch.tensor(mapped_penetration_label, device=penetration_label.device)
+        mapped_penetration_label = torch.unique(mapped_penetration_label, sorted=True)
+
+        return mapped_penetration_label
+    else:
+        raise ValueError('Unsupported dataset type: {}'.format(dataset_type))
 
 def viz_eval_samp(global_gt_dict, x_pred_dict, meta, male_bm, female_bm, out_path_list,
                     imw=720,
