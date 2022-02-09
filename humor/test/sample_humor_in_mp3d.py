@@ -470,6 +470,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
 
                     penetration_label = process_label(penetration_label, dataset_type)
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
+
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
 
                     dest_npz_path = os.path.join(cur_res_out_list[0], "motion_seq.npz")
@@ -514,9 +515,9 @@ def process_penetration(in_penetration, vertices, joints, counts_thresh=100, deb
 
     joints_mask = counts >= counts_thresh
     unique_penetration_joints = torch.masked_select(unique_penetration_joints, joints_mask)
-    verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
 
     if debug:
+        verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
         return unique_penetration_joints, verts_in_penetration[verts_mask]
     else:
         return unique_penetration_joints
