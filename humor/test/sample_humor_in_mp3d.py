@@ -6,6 +6,7 @@ sys.path.append(os.path.join(cur_file_path, '..'))
 import argparse
 import importlib, time
 
+import glob
 import json
 
 import numpy as np
@@ -40,7 +41,7 @@ def write_to_obj(dest_obj_file, vertices, faces):
 
     # print("Total vertices:{0}".format(vertices.shape[0]))
 
-    # Write vertices to file 
+    # Write vertices to file
     for idx in range(vertices.shape[0]):
         w_f.write("v "+str(vertices[idx, 0])+" "+str(vertices[idx, 1])+" "+str(vertices[idx, 2])+"\n")
 
@@ -234,13 +235,13 @@ def test(args_obj, config_file):
     test_dataset = Dataset(split=split, **args_obj.dataset_dict)
 
     # only select a subset of data
-    subset_indices = np.random.choice(len(test_dataset), size=args.num_batches, replace=False)
-    subset_sampler = torch.utils.data.SubsetRandomSampler(subset_indices)
+    #subset_indices = np.random.choice(len(test_dataset), size=args.num_batches, replace=False)
+    #subset_sampler = torch.utils.data.SubsetRandomSampler(subset_indices)
     # create loaders
     test_loader = DataLoader(test_dataset, 
                             batch_size=args.batch_size,
-                            shuffle=False,
-                            sampler=subset_sampler,
+                            shuffle=True,
+                            #sampler=subset_sampler,
                             num_workers=NUM_WORKERS,
                             pin_memory=True,
                             drop_last=False,
@@ -288,43 +289,52 @@ def test(args_obj, config_file):
     with open(os.path.join(args.out, "metadata.json"), "w") as f:
         json.dump(metadata, f)
 
-    house_region_index_dict = {
-                        "17DRP5sb8fy": [0, 7, 8],
-                        "sKLMLpTHeUy": [1],
-                        "X7HyMhZNoso": [16],
-                        "zsNo4HB9uLZ": [0, 13],
-                        }
-    house_region_name_dict = {
-                        "17DRP5sb8fy": ["bedroom", "livingroom", "familyroomlounge"],
-                        "sKLMLpTHeUy": ["familyname_0_1"],
-                        "X7HyMhZNoso": ["livingroom_0_16"],
-                        "zsNo4HB9uLZ": ["bedroom0_0", "livingroom0_13"],
-                        }
+    # house_region_index_dict = {
+    #                     "17DRP5sb8fy": [0, 7, 8],
+    #                     "sKLMLpTHeUy": [1],
+    #                     "X7HyMhZNoso": [16],
+    #                     "zsNo4HB9uLZ": [0, 13],
+    #                     }
+    # house_region_name_dict = {
+    #                     "17DRP5sb8fy": ["bedroom", "livingroom", "familyroomlounge"],
+    #                     "sKLMLpTHeUy": ["familyname_0_1"],
+    #                     "X7HyMhZNoso": ["livingroom_0_16"],
+    #                     "zsNo4HB9uLZ": ["bedroom0_0", "livingroom0_13"],
+    #                     }
 
-    house_name = args.house_name
+    #house_name = args.house_name
     if args.eval_sampling or args.eval_sampling_debug:
         #for house_name in house_region_index_dict.keys():
-        region_index_list = house_region_index_dict[house_name]
-        region_name_list = house_region_name_dict[house_name]
-        for i in range(len(region_index_list)):
-            region_index = region_index_list[i]
-            region_name = region_name_list[i]
+        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs_new/"
+        all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
+        job_num = len(all_sdfs) // args.num_workers
+        if args.worker_id == args.num_workers - 1:
+            jobs = all_sdfs[args.worker_id*job_num:]
+        else:
+            jobs = all_sdfs[args.worker_id*job_num: (args.worker_id+1)*job_num]
 
-            eval_sampling(model, test_dataset, test_loader, device, house_name, region_index, region_name,
-                                out_dir=args.out if args.eval_sampling else None,
-                                num_samples=args.eval_num_samples,
-                                samp_len=args.eval_sampling_len,
-                                viz_contacts=args.viz_contacts,
-                                viz_pred_joints=args.viz_pred_joints,
-                                viz_smpl_joints=args.viz_smpl_joints,
-                                write_obj=args.write_obj, 
-                                save_seq_len=args.seq_len,
-                                debug=args.debug,
-                                dataset_type=args.dataset_type)
+        # region_index_list = house_region_index_dict[house_name]
+        # region_name_list = house_region_name_dict[house_name]
+        # for i in range(len(region_index_list)):
+        #     region_index = region_index_list[i]
+        #     region_name = region_name_list[i]
+
+        eval_sampling(model, test_dataset, test_loader, device, jobs,
+                            out_dir=args.out if args.eval_sampling else None,
+                            num_samples=args.eval_num_samples,
+                            samp_len=args.eval_sampling_len,
+                            viz_contacts=args.viz_contacts,
+                            viz_pred_joints=args.viz_pred_joints,
+                            viz_smpl_joints=args.viz_smpl_joints,
+                            write_obj=args.write_obj, 
+                            save_seq_len=args.seq_len,
+                            debug=args.debug,
+                            dataset_type=args.dataset_type,
+                            num_batches=args.num_batches)
 
     Logger.log('Finished!')
 
-def eval_sampling(model, test_dataset, test_loader, device, house_name, region_index, region_name, 
+def eval_sampling(model, test_dataset, test_loader, device, sdfs, 
                   out_dir=None,
                   num_samples=1,
                   samp_len=10.0,
@@ -334,81 +344,102 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                   write_obj=False,
                   save_seq_len=None,
                   debug=False,
-                  dataset_type="nomap_22"):
+                  dataset_type="nomap_22",
+                  num_batches=50):
     Logger.log('Evaluating sampling qualitatively...')
     from body_model.body_model import BodyModel
     from body_model.utils import SMPLH_PATH
 
     eval_qual_samp_len = int(samp_len * 30.0) # at 30 Hz
 
-    res_out_dir = None
-    if out_dir is not None:
-        #res_out_dir = os.path.join(out_dir, 'eval_sampling')
-        house_out_dir = os.path.join(out_dir, house_name)
-        if not os.path.exists(house_out_dir):
-            os.mkdir(house_out_dir)
+    for sdf_path in sdfs:
+        house_name = sdf_path.split('/')[-1].split('.')[0].split('_')[0]
+        region_name = sdf_path.split('/')[-1].split('.')[0].split('_')[1]
 
-        region_out_dir = os.path.join(house_out_dir, region_name)
-        if not os.path.exists(region_out_dir):
-            os.mkdir(region_out_dir)
+        # skip if this scene doesn't have floor
+        scene_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/scans/" + house_name
+        region_dir = os.path.join(scene_dir, "region_segmentations")
 
-    J = len(SMPL_JOINTS)
-    V = NUM_KEYPT_VERTS
-    male_bm_path = os.path.join(SMPLH_PATH, 'male/model.npz')
-    female_bm_path = os.path.join(SMPLH_PATH, 'female/model.npz')
-    male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
-    female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
+        region_ply_path = os.path.join(region_dir, "{}.ply".format(region_name))
+        region_ply = PlyData.read(region_ply_path)
 
-    with torch.no_grad():
-        test_dataset.pre_batch()
-        model.eval()
-        for i, data in enumerate(test_loader):
-            # get inputs
-            batch_in, batch_out, meta = data
-            print(meta['path'])
-            seq_name_list = [spath[:-4] for spath in meta['path']]
-            if region_out_dir is None:
-                batch_res_out_list = [None]*len(seq_name_list)
-            else:
-                batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
-                print(batch_res_out_list)
-            # continue
-            x_past, _, gt_dict, input_dict, global_gt_dict = model.prepare_input(batch_in, device, 
-                                                                                data_out=batch_out,
-                                                                                return_input_dict=True,
-                                                                                return_global_dict=True)
+        floor_face_ids = np.where(region_ply['face']['category_id'] == 4)
+        if not floor_face_ids:
+            continue
 
-            # roll out predicted motion
-            B, T, _, _ = x_past.size()
-            x_past = x_past[:,0,:,:] # only need input for first step
-            rollout_input_dict = dict()
-            for k in input_dict.keys():
-                rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
+        res_out_dir = None
+        if out_dir is not None:
+            #res_out_dir = os.path.join(out_dir, 'eval_sampling')
+            house_out_dir = os.path.join(out_dir, house_name)
+            if not os.path.exists(house_out_dir):
+                os.mkdir(house_out_dir)
 
-            # load scene sdf
-            sdf_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/MP3D_R/sdf"
-            scene_name = house_name + "-" + region_name
-            with open(os.path.join(sdf_dir, scene_name + ".json"), "r") as f:
-                sdf_data = json.load(f)
-                grid_min = torch.tensor((sdf_data['min'][0], -sdf_data['min'][2], sdf_data['min'][1]), dtype=torch.float32, device=device)
-                grid_max = torch.tensor((sdf_data['max'][0], -sdf_data['max'][2], sdf_data['max'][1]), dtype=torch.float32, device=device)
-                grid_dim = sdf_data['dim']
-            voxel_size = (grid_max - grid_min) / grid_dim
-            sdf = np.load(os.path.join(sdf_dir, scene_name + '_sdf.npy')).reshape(grid_dim, grid_dim, grid_dim).transpose(0, 2, 1)
-            sdf = torch.tensor(sdf, dtype=torch.float32, device=device)#.permute(0, 2, 1)
-            sdf_penetration_weight = 1
-            penetration_loss_threshold = 2 
-            min_seq_len = 30
+            region_out_dir = os.path.join(house_out_dir, region_name)
+            if not os.path.exists(region_out_dir):
+                os.mkdir(region_out_dir)
 
-            # sample same trajectory multiple times and save the joints/contacts output
-            for samp_idx in range(num_samples):
+        J = len(SMPL_JOINTS)
+        V = NUM_KEYPT_VERTS
+        male_bm_path = os.path.join(SMPLH_PATH, 'male/model.npz')
+        female_bm_path = os.path.join(SMPLH_PATH, 'female/model.npz')
+        male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
+        female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
+
+        batch_cnt = 0
+        with torch.no_grad():
+            test_dataset.pre_batch()
+            model.eval()
+            for i, data in enumerate(test_loader):
+                # get inputs
+                batch_in, batch_out, meta = data
+                print(meta['path'])
+                seq_name_list = [spath[:-4] for spath in meta['path']]
+                if region_out_dir is None:
+                    batch_res_out_list = [None]*len(seq_name_list)
+                else:
+                    batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
+                    print(batch_res_out_list)
+                # continue
+                x_past, _, gt_dict, input_dict, global_gt_dict = model.prepare_input(batch_in, device, 
+                                                                                    data_out=batch_out,
+                                                                                    return_input_dict=True,
+                                                                                    return_global_dict=True)
+
+                # roll out predicted motion
+                B, T, _, _ = x_past.size()
+                x_past = x_past[:,0,:,:] # only need input for first step
+                rollout_input_dict = dict()
+                for k in input_dict.keys():
+                    rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
+
+                # load scene sdf
+                #sdf_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/MP3D_R/sdf"
+                #scene_name = house_name + "-" + region_name
+                json_path = sdf_path.replace(".npy", ".json")
+                #with open(os.path.join(sdf_dir, scene_name + ".json"), "r") as f:
+                with open(json_path, "r") as f:
+                    sdf_data = json.load(f)
+                    #grid_min = torch.tensor((sdf_data['min'][0], -sdf_data['min'][2], sdf_data['min'][1]), dtype=torch.float32, device=device)
+                    #grid_max = torch.tensor((sdf_data['max'][0], -sdf_data['max'][2], sdf_data['max'][1]), dtype=torch.float32, device=device)
+                    grid_min = torch.tensor((sdf_data['min'][0], sdf_data['min'][1], sdf_data['min'][2]), dtype=torch.float32, device=device)
+                    grid_max = torch.tensor((sdf_data['max'][0], sdf_data['max'][1], sdf_data['max'][2]), dtype=torch.float32, device=device)
+                    grid_dim = sdf_data['dim']
+                voxel_size = (grid_max - grid_min) / grid_dim
+                sdf = np.load(sdf_path).reshape(grid_dim, grid_dim, grid_dim).transpose(1, 0, 2)
+                sdf = torch.tensor(sdf, dtype=torch.float32, device=device)#.permute(0, 2, 1)
+                sdf_penetration_weight = 1
+                penetration_loss_threshold = 2 
+                min_seq_len = 30
+
+                # sample same trajectory multiple times and save the joints/contacts output
+                #for samp_idx in range(num_samples):
                 x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device))
 
                 # translate the human to the scene
-                x_pred_dict, floor_z_max = translate_to_scene(x_pred_dict, house_name, region_index, return_floor=True)
+                x_pred_dict, floor_z_max = translate_to_scene(x_pred_dict, house_name, region_name, return_floor=True)
 
                 # visualize and save
-                print('Visualizing sample %d/%d!' % (samp_idx+1, num_samples))
+                #print('Visualizing sample %d/%d!' % (samp_idx+1, num_samples))
                 imsize = (1080, 1080)
                 cur_res_out_list = batch_res_out_list
                 if region_out_dir is not None:
@@ -430,7 +461,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                     penetration_loss, in_penetration = check_if_valid(human_verts[f_idx: f_idx + 1], sdf, grid_min, grid_max, grid_dim, \
                         voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
 
-                    #print("penetration loss:", penetration_loss)
+                    print("penetration loss:", penetration_loss)
                     if penetration_loss > penetration_loss_threshold:
                         # if len(valid_verts_list) >= min_valid_seq_len:
                         end_idx = f_idx
@@ -438,7 +469,7 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                     else:
                         valid_verts_list.append(human_verts[f_idx])
                     #valid_verts_list.append(human_verts[f_idx])
-              
+                
                 if len(valid_verts_list) == eval_qual_samp_len:
                     end_idx = eval_qual_samp_len
 
@@ -462,13 +493,14 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                         penetration_label = torch.tensor([100], device=device) 
                     else:
                         if debug:
-                            penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True)
-                            verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
+                            penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=0)
                             np.save(verts_path, verts_in_penetration.cpu().numpy())
+                            verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
                         else:
-                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False)
+                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=50)
 
                     penetration_label = process_label(penetration_label, dataset_type)
+
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
 
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
@@ -477,18 +509,25 @@ def eval_sampling(model, test_dataset, test_loader, device, house_name, region_i
                     cano_rot_inv = torch.eye(4).to(x_past.device)
                     gen_data_npz(x_pred_dict, meta, seq_len, end_idx, cano_rot_inv, dest_npz_path)
 
-def translate_to_scene(x_pred_dict, house_name, region_index, return_floor=False):
+                    batch_cnt += 1
+                    if batch_cnt >= num_batches:
+                        break
+
+
+def translate_to_scene(x_pred_dict, house_name, region_name, return_floor=False):
     """Translate the human location to a random location on the floor."""
     scene_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/scans/" + house_name
     region_dir = os.path.join(scene_dir, "region_segmentations")
 
-    region_ply_path = os.path.join(region_dir, "region{}.ply".format(region_index))
+    region_ply_path = os.path.join(region_dir, "{}.ply".format(region_name))
     region_ply = PlyData.read(region_ply_path)
 
     floor_face_ids = np.where(region_ply['face']['category_id'] == 4)
     floor_vertex_ids = np.stack(region_ply['face']['vertex_indices'][floor_face_ids], axis=0).reshape(-1,)
 
     rand_vertex_id = np.random.choice(floor_vertex_ids)
+    print("all_floor_vertex:", floor_vertex_ids.shape)
+    print("rand_vertex_id:", rand_vertex_id)
 
     rand_vertex_x = region_ply['vertex']['x'][rand_vertex_id]
     rand_vertex_y = region_ply['vertex']['y'][rand_vertex_id]
@@ -513,13 +552,20 @@ def process_penetration(in_penetration, vertices, joints, counts_thresh=100, deb
     penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
     unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
 
+    print("counts:", counts)
     joints_mask = counts >= counts_thresh
     unique_penetration_joints = torch.masked_select(unique_penetration_joints, joints_mask)
 
     if debug:
-        verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
+        if unique_penetration_joints.nelement() == 0:
+            unique_penetration_joints = torch.tensor([100]).to(vertices.device)
+            verts_mask = torch.tensor([]).to(vertices.device)
+        else:
+            verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
         return unique_penetration_joints, verts_in_penetration[verts_mask]
     else:
+        if unique_penetration_joints.nelement() == 0:
+            unique_penetration_joints = torch.tensor([100]).to(vertices.device)
         return unique_penetration_joints
 
 def process_label(penetration_label, dataset_type="nomap_22"):
