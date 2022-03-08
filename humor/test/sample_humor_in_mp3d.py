@@ -51,6 +51,37 @@ def write_to_obj(dest_obj_file, vertices, faces):
 
     w_f.close() 
 
+def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
+    root_ori = motion_seq["root_orient"].reshape(-1, 3, 3)
+    root_trans = motion_seq["joints"][0, :, 0, :]
+
+    dot_products = []
+    for t in range(end_idx-2, end_idx-2-check_hor, -1):
+        root_ori_t = root_ori[t]
+        root_ori_t_x = -root_ori_t[:, 0]
+        root_ori_t_y = root_ori_t[:, 2]
+        root_ori_t_z = root_ori_t[:, 1]
+        root_ori_t = torch.stack((root_ori_t_x, root_ori_t_y, root_ori_t_z), axis=1)
+        ori = root_ori_t @ torch.FloatTensor([0, 1, 0]).to(root_ori.device)
+        ori = ori / torch.norm(ori)
+
+        root_trans_t = root_trans[t, :]
+        root_trans_t1 = root_trans[t+1, :]
+        vel = root_trans_t1 - root_trans_t
+        vel_pred = motion_seq["trans_vel"][0, t, :]
+        vel = vel / torch.norm(vel)
+        print("vel:", vel)
+        print("vel_pred:", vel_pred)
+
+        dot_products.append(ori @ vel)
+    dot_products = torch.stack(dot_products)
+
+    print(dot_products)
+    if torch.all(dot_products > check_thresh):
+        return True
+    else:
+        return False
+
 def check_if_valid(vertices, sdf, grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight, floor_z_max=-1e3):
     # vertices: bs(1) X N X 3
     # Compute scene penetration using signed distance field (SDF)
@@ -305,8 +336,16 @@ def test(args_obj, config_file):
     #house_name = args.house_name
     if args.eval_sampling or args.eval_sampling_debug:
         #for house_name in house_region_index_dict.keys():
-        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs_new/"
-        all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
+        with open('/orion/u/bxpan/exoskeleton/more_scenes_house_region_mapping.json', 'r') as f:
+            house_region_mapping = json.load(f)
+        selected_sdfs = []
+        for house in house_region_mapping.keys():
+            for region in house_region_mapping[house]:
+                selected_sdfs.append(house + "_" + region + ".npy")
+        
+        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs/"
+        all_sdfs = [sdf_root + sdf for sdf in selected_sdfs]
+        #all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
         job_num = len(all_sdfs) // args.num_workers
         if args.worker_id == args.num_workers - 1:
             jobs = all_sdfs[args.worker_id*job_num:]
@@ -385,6 +424,8 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
         male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
         female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
 
+        saved_batch_cnt = 0
+        max_batch = num_batches * 50                # give up on this scenes if evaluated over this number of samples
         batch_cnt = 0
         with torch.no_grad():
             test_dataset.pre_batch()
@@ -478,7 +519,12 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                 else:
                     seq_len = end_idx
 
-                if len(valid_verts_list) >= min_seq_len: 
+                if len(valid_verts_list) >= min_seq_len:
+                    # filter to have only forward motion
+                    #if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=20, check_thresh=0.5):
+                    #    continue
+                    seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0)
+
                     # If longer than minimum sequence length, save motion sequence and collision supervision
                     valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
                     #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)
@@ -494,12 +540,12 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                     else:
                         if debug:
                             penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=0)
-                            np.save(verts_path, verts_in_penetration.cpu().numpy())
                             verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
+                            np.save(verts_path, verts_in_penetration.cpu().numpy())
                         else:
-                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=50)
+                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=100)
 
-                    penetration_label = process_label(penetration_label, dataset_type)
+                    #penetration_label = process_label(penetration_label, dataset_type)
 
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
 
@@ -509,10 +555,15 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                     cano_rot_inv = torch.eye(4).to(x_past.device)
                     gen_data_npz(x_pred_dict, meta, seq_len, end_idx, cano_rot_inv, dest_npz_path)
 
-                    batch_cnt += 1
-                    if batch_cnt >= num_batches:
+                    saved_batch_cnt += 1
+                    if saved_batch_cnt >= num_batches:
                         break
 
+                print("saved:", saved_batch_cnt)
+                print("all:", batch_cnt)
+                batch_cnt += 1
+                if batch_cnt >= max_batch:
+                    break
 
 def translate_to_scene(x_pred_dict, house_name, region_name, return_floor=False):
     """Translate the human location to a random location on the floor."""
@@ -546,29 +597,7 @@ def translate_to_scene(x_pred_dict, house_name, region_name, return_floor=False)
     else:
         return x_pred_dict
 
-def process_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False):
-    verts_in_penetration = vertices[in_penetration, :]
-    verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
-    penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
-    unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
-
-    print("counts:", counts)
-    joints_mask = counts >= counts_thresh
-    unique_penetration_joints = torch.masked_select(unique_penetration_joints, joints_mask)
-
-    if debug:
-        if unique_penetration_joints.nelement() == 0:
-            unique_penetration_joints = torch.tensor([100]).to(vertices.device)
-            verts_mask = torch.tensor([]).to(vertices.device)
-        else:
-            verts_mask = torch.tensor([1 if penetration_joint in unique_penetration_joints else 0 for penetration_joint in penetration_joints], device=verts_in_penetration.device).bool()
-        return unique_penetration_joints, verts_in_penetration[verts_mask]
-    else:
-        if unique_penetration_joints.nelement() == 0:
-            unique_penetration_joints = torch.tensor([100]).to(vertices.device)
-        return unique_penetration_joints
-
-def process_label(penetration_label, dataset_type="nomap_22"):
+def map_joints(penetration_label, dataset_type="map_10"):
     """
     Cluster penetration label to only a few important joints.
     """
@@ -618,11 +647,38 @@ def process_label(penetration_label, dataset_type="nomap_22"):
 
         mapped_penetration_label = [mapping_dict[orig_label.item()] for orig_label in penetration_label]
         mapped_penetration_label = torch.tensor(mapped_penetration_label, device=penetration_label.device)
-        mapped_penetration_label = torch.unique(mapped_penetration_label, sorted=True)
+        #mapped_penetration_label = torch.unique(mapped_penetration_label, sorted=True)
 
         return mapped_penetration_label
     else:
         raise ValueError('Unsupported dataset type: {}'.format(dataset_type))
+
+def process_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False, dataset_type="map_10"):
+    verts_in_penetration = vertices[in_penetration, :]
+    verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
+    penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
+    unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
+
+    unique_penetration_joints = map_joints(unique_penetration_joints, dataset_type)
+    unique_joints = torch.unique(unique_penetration_joints, return_counts=False)
+    new_counts = torch.zeros_like(unique_joints)
+    for i in range(unique_joints.shape[0]):
+        new_counts[i] = counts[(unique_penetration_joints == unique_joints[i]).nonzero(as_tuple=True)[0]].sum()
+    #print("counts:", counts)
+    joints_mask = new_counts >= counts_thresh
+    unique_joints = torch.masked_select(unique_joints, joints_mask)
+
+    if debug:
+        if unique_joints.nelement() == 0:
+            unique_joints = torch.tensor([100]).to(vertices.device)
+            verts_mask = torch.tensor([]).to(vertices.device)
+        else:
+            verts_mask = torch.tensor([1 if penetration_joint in unique_joints else 0 for penetration_joint in map_joints(penetration_joints, dataset_type)], device=verts_in_penetration.device).bool()
+        return unique_joints, verts_in_penetration[verts_mask]
+    else:
+        if unique_joints.nelement() == 0:
+            unique_joints = torch.tensor([100]).to(vertices.device)
+        return unique_joints
 
 def viz_eval_samp(global_gt_dict, x_pred_dict, meta, male_bm, female_bm, out_path_list,
                     imw=720,
