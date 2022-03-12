@@ -70,8 +70,8 @@ def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
         vel = root_trans_t1 - root_trans_t
         vel_pred = motion_seq["trans_vel"][0, t, :]
         vel = vel / torch.norm(vel)
-        print("vel:", vel)
-        print("vel_pred:", vel_pred)
+        #print("vel:", vel)
+        #print("vel_pred:", vel_pred)
 
         dot_products.append(ori @ vel)
     dot_products = torch.stack(dot_products)
@@ -336,16 +336,17 @@ def test(args_obj, config_file):
     #house_name = args.house_name
     if args.eval_sampling or args.eval_sampling_debug:
         #for house_name in house_region_index_dict.keys():
-        with open('/orion/u/bxpan/exoskeleton/more_scenes_house_region_mapping.json', 'r') as f:
-            house_region_mapping = json.load(f)
-        selected_sdfs = []
-        for house in house_region_mapping.keys():
-            for region in house_region_mapping[house]:
-                selected_sdfs.append(house + "_" + region + ".npy")
         
-        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs/"
-        all_sdfs = [sdf_root + sdf for sdf in selected_sdfs]
-        #all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
+        # with open('/orion/u/bxpan/exoskeleton/more_scenes_house_region_mapping.json', 'r') as f:
+        #     house_region_mapping = json.load(f)
+        # selected_sdfs = []
+        # for house in house_region_mapping.keys():
+        #     for region in house_region_mapping[house]:
+        #         selected_sdfs.append(house + "_" + region + ".npy")
+        
+        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs_new/"
+        #all_sdfs = [sdf_root + sdf for sdf in selected_sdfs]
+        all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
         job_num = len(all_sdfs) // args.num_workers
         if args.worker_id == args.num_workers - 1:
             jobs = all_sdfs[args.worker_id*job_num:]
@@ -521,19 +522,23 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
 
                 if len(valid_verts_list) >= min_seq_len:
                     # filter to have only forward motion
-                    #if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=20, check_thresh=0.5):
-                    #    continue
-                    seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0)
+                    if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0):
+                        continue
+                    #seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0)
 
                     # If longer than minimum sequence length, save motion sequence and collision supervision
                     valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
                     #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)
                     #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)[:20, ...]
-                    os.makedirs(cur_res_out_list[0], exist_ok=False)
                     if write_obj: 
                         for t_idx in range(seq_len):
                             dest_mesh_path = os.path.join(cur_res_out_list[0], "%05d"%(t_idx) + ".obj")
                             write_to_obj(dest_mesh_path, valid_verts_seq[t_idx].data.cpu().numpy(), human_faces.data.cpu().numpy())
+                    
+                    #if end_idx == eval_qual_samp_len:
+                    #    continue
+
+                    os.makedirs(cur_res_out_list[0], exist_ok=False)
                     if end_idx == eval_qual_samp_len:
                         # no collision happening in this sequence
                         penetration_label = torch.tensor([100], device=device) 
