@@ -344,7 +344,7 @@ def test(args_obj, config_file):
         #     for region in house_region_mapping[house]:
         #         selected_sdfs.append(house + "_" + region + ".npy")
         
-        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs_new/"
+        sdf_root = "/orion/u/bxpan/exoskeleton/mp3d_sdfs/"
         #all_sdfs = [sdf_root + sdf for sdf in selected_sdfs]
         all_sdfs = sorted(glob.glob(os.path.join(sdf_root, "*.npy")))
         job_num = len(all_sdfs) // args.num_workers
@@ -530,6 +530,7 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                     valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
                     #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)
                     #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)[:20, ...]
+                    os.makedirs(cur_res_out_list[0], exist_ok=False)
                     if write_obj: 
                         for t_idx in range(seq_len):
                             dest_mesh_path = os.path.join(cur_res_out_list[0], "%05d"%(t_idx) + ".obj")
@@ -538,7 +539,6 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                     #if end_idx == eval_qual_samp_len:
                     #    continue
 
-                    os.makedirs(cur_res_out_list[0], exist_ok=False)
                     if end_idx == eval_qual_samp_len:
                         # no collision happening in this sequence
                         penetration_label = torch.tensor([100], device=device) 
