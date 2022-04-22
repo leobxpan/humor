@@ -150,7 +150,7 @@ class TestConfig(BaseConfig):
 
         self.parser.add_argument('--eval-sampling', dest='eval_sampling', action='store_true', help="Visualizing random sample rollouts")
         self.parser.set_defaults(eval_sampling=False)
-        self.parser.add_argument('--eval-sampling-len', type=float, default=10.0, help='Number of seconds to sample for (default 10 s)')
+        self.parser.add_argument('--eval-sampling-len', dest='eval_sampling_len', type=float, default=10.0, help='Number of seconds to sample for (default 10 s)')
         self.parser.add_argument('--eval-sampling-debug', dest='eval_sampling_debug', action='store_true', help="Visualizes random samples in interactive visualization.")
         self.parser.set_defaults(eval_sampling_debug=False)
         self.parser.add_argument('--eval-test', dest='eval_full_test', action='store_true', help="Evaluate on the full test set with same metrics as during training.")

@@ -30,7 +30,9 @@ from libmesh.inside_mesh import check_mesh_contains
 NUM_WORKERS = 0
 NUM_VERTS_THRESH = 10
 #THREEDFRONT_ROOT = '/orion/u/paschald/Datasets/3D-FRONT_scenes/'
-THREEDFRONT_ROOT = '/orion/u/bxpan/exoskeleton/3dfront_dataset/'
+#THREEDFRONT_ROOT = '/orion/u/bxpan/exoskeleton/3dfront_dataset/'
+THREEDFRONT_ROOT = '/orion/group/3D-FRONT_scenes/'
+ADDT_COL_HOR = 10           # additional buffer to check collision after the actual collision (as a tolerance for collision checking)
 
 def parse_args(argv):
     # create config and parse args
@@ -317,12 +319,15 @@ def test(args_obj, config_file):
         json.dump(metadata, f)
 
     if args.eval_sampling or args.eval_sampling_debug:
-        all_houses = sorted(os.listdir(THREEDFRONT_ROOT))
+        #all_houses = sorted(os.listdir(THREEDFRONT_ROOT))
+        all_houses = np.load('/orion/u/bxpan/exoskeleton/all_scenes.npy')
         job_num = len(all_houses) // args.num_workers
         if args.worker_id == args.num_workers - 1:
             jobs = all_houses[args.worker_id*job_num:]
         else:
             jobs = all_houses[args.worker_id*job_num: (args.worker_id+1)*job_num]
+
+        #jobs = ['LivingRoom-71076']
 
         # region_index_list = house_region_index_dict[house_name]
         # region_name_list = house_region_name_dict[house_name]
@@ -484,8 +489,28 @@ def eval_sampling(model, test_dataset, test_loader, device, houses,
 
                 if len(valid_verts_list) >= min_seq_len:
                     # filter to have only forward motion
-                    if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0):
+                    if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=30, check_thresh=0.3):
                         continue
+
+                    # also check for the next ADDT_COL_HOR time steps. Collisions during that period are also counted
+                    all_addt_penetration_labels = []
+                    if end_idx != eval_qual_samp_len and not person_out_of_scene_flag:
+                        for i in range(ADDT_COL_HOR):
+                            if end_idx + 1 + i >= eval_qual_samp_len:
+                                break
+                            addt_scene_in_penetration = check_if_valid(human_verts[end_idx + 1 + i: end_idx + 2 + i], scene)
+                            addt_wall_in_penetration = check_if_valid(human_verts[end_idx + 1 + i: end_idx + 2 + i], wall)
+                            if addt_scene_in_penetration.sum() < NUM_VERTS_THRESH and addt_wall_in_penetration.sum() < NUM_VERTS_THRESH:
+                                continue
+                            elif addt_scene_in_penetration.sum() >= NUM_VERTS_THRESH and addt_wall_in_penetration.sum() < NUM_VERTS_THRESH:
+                                addt_in_penetration = addt_scene_in_penetration
+                            elif addt_scene_in_penetration.sum() < NUM_VERTS_THRESH and addt_wall_in_penetration.sum() >= NUM_VERTS_THRESH:
+                                addt_in_penetration = addt_wall_in_penetration
+                            else:
+                                addt_in_penetration = np.logical_or(addt_scene_in_penetration, addt_wall_in_penetration)
+
+                            addt_penetration_label = process_penetration(addt_in_penetration.squeeze(), human_verts[end_idx + 1 + i], x_pred_dict['joints'][0, end_idx + 1 + i], debug=False, counts_thresh=0)
+                            all_addt_penetration_labels.append(addt_penetration_label.cpu().numpy())
 
                     # If longer than minimum sequence length, save motion sequence and collision supervision
                     #valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
@@ -496,7 +521,7 @@ def eval_sampling(model, test_dataset, test_loader, device, houses,
                         for t_idx in range(seq_len):
                             dest_mesh_path = os.path.join(cur_res_out_list[0], "%05d"%(t_idx) + ".obj")
                             write_to_obj(dest_mesh_path, valid_verts_seq[t_idx].data.cpu().numpy(), human_faces.data.cpu().numpy())
-                    
+
                     #if end_idx == eval_qual_samp_len:
                     #    continue
 
@@ -525,8 +550,11 @@ def eval_sampling(model, test_dataset, test_loader, device, houses,
                     #penetration_label = process_label(penetration_label, dataset_type)
 
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
-
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
+
+                    if all_addt_penetration_labels:
+                        addt_penetration_label_path = os.path.join(cur_res_out_list[0], 'addt_penetration_label.npy')
+                        np.save(addt_penetration_label_path, np.array(all_addt_penetration_labels, dtype=object), allow_pickle=True)
 
                     dest_npz_path = os.path.join(cur_res_out_list[0], "motion_seq.npz")
                     cano_rot_inv = torch.eye(4).to(x_past.device)
