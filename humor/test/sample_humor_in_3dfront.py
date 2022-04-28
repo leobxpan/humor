@@ -28,7 +28,7 @@ from losses.humor_loss import CONTACT_THRESH
 from libmesh.inside_mesh import check_mesh_contains
 
 NUM_WORKERS = 0
-NUM_VERTS_THRESH = 10
+NUM_VERTS_THRESH = 5
 #THREEDFRONT_ROOT = '/orion/u/paschald/Datasets/3D-FRONT_scenes/'
 #THREEDFRONT_ROOT = '/orion/u/bxpan/exoskeleton/3dfront_dataset/'
 THREEDFRONT_ROOT = '/orion/group/3D-FRONT_scenes/'
@@ -98,13 +98,42 @@ def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
     else:
         return False
 
-def is_person_in_scene(human_verts, scene_bounds):
-    human_verts = human_verts[0][:, :2]
-    
-    scene_bounds_min = scene_bounds[0][:2].repeat(human_verts.shape[0], 1)
-    scene_bounds_max = scene_bounds[1][:2].repeat(human_verts.shape[0], 1)
+# def is_person_in_scene(human_verts, scene_bounds):
+#     human_verts = human_verts[0][:, :2]
+#     
+#     scene_bounds_min = scene_bounds[0][:2].repeat(human_verts.shape[0], 1)
+#     scene_bounds_max = scene_bounds[1][:2].repeat(human_verts.shape[0], 1)
+# 
+#     return (human_verts >= scene_bounds_min).all().item() and (human_verts <= scene_bounds_max).all().item()
 
-    return (human_verts >= scene_bounds_min).all().item() and (human_verts <= scene_bounds_max).all().item()
+def is_person_in_scene(human_verts, floor_verts):
+    floor_2d = floor_verts[:, :2]
+    human_2d = human_verts[:, :2]
+
+    floor_min = floor_2d.min(axis=0) - 0.5
+    floor_max = floor_2d.max(axis=0) + 0.5
+
+    resolution = 64
+
+    floor_img = np.zeros((resolution, resolution))
+    floor_2d = (floor_2d - floor_min) / (floor_max - floor_min)
+    floor_2d = np.rint(floor_2d).astype(int)
+    for i in range(floor_2d.shape[0]):
+        floor_img[floor_2d[i, 0], floor_2d[i, 1]] = 1
+
+    human_img = np.zeros((resolution, resolution))
+    human_2d = (human_2d - floor_min) / (floor_max - floor_min)
+    human_2d = np.rint(human_2d).astype(int)
+    for i in range(human_2d.shape[0]):
+        human_img[human_2d[i, 0], human_2d[i, 1]] = 1
+
+    union = np.logical_or(floor_img, human_img)
+    diff = union - floor_img
+
+    if diff.sum() == 0:
+        return True
+    else:
+        return False
 
 def check_if_valid(vertices, scene):
     # vertices: bs(1) X N X 3
@@ -320,7 +349,8 @@ def test(args_obj, config_file):
 
     if args.eval_sampling or args.eval_sampling_debug:
         #all_houses = sorted(os.listdir(THREEDFRONT_ROOT))
-        all_houses = np.load('/orion/u/bxpan/exoskeleton/all_scenes.npy')
+        all_houses = np.load('/orion/u/bxpan/exoskeleton/all_scenes_new.npy')
+        #all_houses = ['LivingDiningRoom-291']
         job_num = len(all_houses) // args.num_workers
         if args.worker_id == args.num_workers - 1:
             jobs = all_houses[args.worker_id*job_num:]
@@ -464,7 +494,7 @@ def eval_sampling(model, test_dataset, test_loader, device, houses,
                         break
                     else:
                         # check if person is still within scene bounds (need this due to missing doors / windows)
-                        if is_person_in_scene(human_verts[f_idx: f_idx + 1], scene_bounds):
+                        if is_person_in_scene(human_verts[f_idx: f_idx + 1].squeeze(0).cpu().numpy(), floor.vertices):
                             valid_verts_list.append(human_verts[f_idx])
                         else:
                             person_out_of_scene_flag = True
@@ -540,15 +570,41 @@ def eval_sampling(model, test_dataset, test_loader, device, houses,
                             else:
                                 in_penetration = np.logical_or(scene_in_penetration, wall_in_penetration)
 
-                            if debug:
-                                penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=0)
-                                verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
-                                np.save(verts_path, verts_in_penetration.cpu().numpy())
-                            else:
-                                penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=0)
+                            # save collision vertices (on human)
+                            col_verts = human_verts[end_idx][in_penetration]
+                            col_verts_path = os.path.join(cur_res_out_list[0], 'col_verts.npy')
+                            np.save(col_verts_path, col_verts.cpu().numpy())
+
+                            # save all motion info starting from collision step
+                            dest_npz_path = os.path.join(cur_res_out_list[0], "motion_col_step.npz")
+
+                            new_trans = x_pred_dict['trans'][0, end_idx:]
+                            new_trans_vel= x_pred_dict['trans_vel'][0, end_idx:]
+                            new_root_orient = x_pred_dict['root_orient'][0, end_idx:]
+                            new_root_orient_vel = x_pred_dict['root_orient_vel'][0, end_idx:]
+                            new_pose_body = x_pred_dict['pose_body'][0, end_idx:]
+                            new_joints = x_pred_dict['joints'][0, end_idx:]
+                            new_joints_vel = x_pred_dict['joints_vel'][0, end_idx:]
+
+                            np.savez(dest_npz_path, fps=30,
+                                gender=meta['gender'],
+                                trans=new_trans.data.cpu().numpy(), # T X 3
+                                root_orient=new_root_orient.data.cpu().numpy(), # T X 3 
+                                pose_body=new_pose_body.data.cpu().numpy(), # T X 63
+                                betas=meta['betas'][0, 0].data.cpu().numpy(), # 10
+                                joints=new_joints.data.cpu().numpy(), # T X 22 X 3
+                                joints_vel=new_joints_vel.data.cpu().numpy(), # T X 22 X 3
+                                trans_vel=new_trans.data.cpu().numpy(), # T X 3
+                                root_orient_vel=new_root_orient_vel.data.cpu().numpy()) # T X 3
+        # joint_orient_vel_seq=joint_orient_vel_seq, # T: Based on joints_world2aligned_rot, calculate angular velocity for z-axis rotation. 
+                            #if debug:
+                            #    penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=0)
+                            #    verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
+                            #    np.save(verts_path, verts_in_penetration.cpu().numpy())
+                            #else:
+                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=0)
 
                     #penetration_label = process_label(penetration_label, dataset_type)
-
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
 
