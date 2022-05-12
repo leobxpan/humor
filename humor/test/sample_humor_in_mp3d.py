@@ -1,4 +1,3 @@
-
 import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
@@ -27,6 +26,7 @@ from datasets.amass_utils import NUM_KEYPT_VERTS, CONTACT_INDS
 from losses.humor_loss import CONTACT_THRESH
 
 NUM_WORKERS = 0
+ADDT_COL_HOR = 10
 
 def parse_args(argv):
     # create config and parse args
@@ -503,7 +503,7 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                     penetration_loss, in_penetration = check_if_valid(human_verts[f_idx: f_idx + 1], sdf, grid_min, grid_max, grid_dim, \
                         voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
 
-                    print("penetration loss:", penetration_loss)
+                    #print("penetration loss:", penetration_loss)
                     if penetration_loss > penetration_loss_threshold:
                         # if len(valid_verts_list) >= min_valid_seq_len:
                         end_idx = f_idx
@@ -522,9 +522,30 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
 
                 if len(valid_verts_list) >= min_seq_len:
                     # filter to have only forward motion
-                    if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0):
+                    if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0.2):
                         continue
-                    #seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0)
+
+                    all_addt_penetration_labels = []
+                    all_addt_col_verts = []
+                    addt_time_steps = []
+                    if end_idx != eval_qual_samp_len:
+                        for i in range(ADDT_COL_HOR):
+                            if end_idx + 1 + i >= eval_qual_samp_len:
+                                break
+                            addt_penetration_loss, addt_in_penetration = check_if_valid(human_verts[end_idx + 1 + i: end_idx + 2 + i], sdf, \
+                            grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
+
+                            if addt_penetration_loss < penetration_loss_threshold:
+                                continue
+                            else:
+                                addt_penetration_label, addt_verts_in_penetration = process_penetration(addt_in_penetration.squeeze(), human_verts[end_idx + 1 + i], x_pred_dict['joints'][0, end_idx + 1 + i], debug=True, counts_thresh=50)
+
+                                if addt_penetration_label[0] == 100.:
+                                    continue
+                                else:
+                                    all_addt_penetration_labels.append(addt_penetration_label.cpu().numpy())
+                                    all_addt_col_verts.append(addt_verts_in_penetration.cpu().numpy())
+                                    addt_time_steps.append(i)
 
                     # If longer than minimum sequence length, save motion sequence and collision supervision
                     valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
@@ -548,13 +569,25 @@ def eval_sampling(model, test_dataset, test_loader, device, sdfs,
                             verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
                             np.save(verts_path, verts_in_penetration.cpu().numpy())
                         else:
-                            penetration_label = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=False, counts_thresh=100)
+                            penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=50)
 
                     #penetration_label = process_label(penetration_label, dataset_type)
 
                     penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
-
                     np.save(penetration_label_path, penetration_label.cpu().numpy())
+
+                    if all_addt_penetration_labels:
+                        for i in range(len(addt_time_steps)):
+                            time_step = addt_time_steps[i]
+                            addt_col_verts_path = os.path.join(cur_res_out_list[0], 'addt_col_verts_%02d.npy'%(time_step))
+                            addt_penetration_label_path = os.path.join(cur_res_out_list[0], 'addt_penetration_label_%02d.npy'%(time_step))
+
+                            np.save(addt_penetration_label_path, all_addt_penetration_labels[i])
+                            np.save(addt_col_verts_path, all_addt_col_verts[i])
+
+                    if penetration_label[0] != 100.:
+                        col_verts_path = os.path.join(cur_res_out_list[0], 'col_verts.npy')
+                        np.save(col_verts_path, verts_in_penetration.cpu().numpy())
 
                     dest_npz_path = os.path.join(cur_res_out_list[0], "motion_seq.npz")
                     cano_rot_inv = torch.eye(4).to(x_past.device)
@@ -677,9 +710,10 @@ def process_penetration(in_penetration, vertices, joints, counts_thresh=100, deb
         if unique_joints.nelement() == 0:
             unique_joints = torch.tensor([100]).to(vertices.device)
             verts_mask = torch.tensor([]).to(vertices.device)
+            return unique_joints, verts_mask
         else:
             verts_mask = torch.tensor([1 if penetration_joint in unique_joints else 0 for penetration_joint in map_joints(penetration_joints, dataset_type)], device=verts_in_penetration.device).bool()
-        return unique_joints, verts_in_penetration[verts_mask]
+            return unique_joints, verts_in_penetration[verts_mask]
     else:
         if unique_joints.nelement() == 0:
             unique_joints = torch.tensor([100]).to(vertices.device)
