@@ -168,7 +168,7 @@ def gen_data_npz(x_pred_dict, meta, actual_t, end_idx, cano_rot_inv, dest_npz_pa
         betas=meta['betas'][0, 0].data.cpu().numpy(), # 10
         joints=new_joints.data.cpu().numpy(), # T X 22 X 3
         joints_vel=new_joints_vel.data.cpu().numpy(), # T X 22 X 3
-        trans_vel=new_trans.data.cpu().numpy(), # T X 3
+        trans_vel=new_trans_vel.data.cpu().numpy(), # T X 3
         root_orient_vel=new_root_orient_vel.data.cpu().numpy()) # T X 3
         # joint_orient_vel_seq=joint_orient_vel_seq, # T: Based on joints_world2aligned_rot, calculate angular velocity for z-axis rotation. 
         # pose_body_vel=pose_body_vel_seq, # T X 21 X 3

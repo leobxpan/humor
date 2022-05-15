@@ -187,8 +187,8 @@ max_num_motions = 200
 min_num_motions = 30
 
 # parallelization
-num_workers = 20
-worker_id = 0 
+num_workers = 30
+worker_id = 29 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
 
@@ -200,7 +200,7 @@ addt_col_hor = 10                   # check for 10 time steps after the actual c
 
 # debug visualizations
 vis_traj = False
-save_obj = True
+save_obj = False
 
 with open(os.path.join(scene_root, "descending_scene_and_areas.pkl"), "rb") as f:
     descending_scenes_and_areas = pickle.load(f)
@@ -291,6 +291,18 @@ for i in range(len(jobs)):
         num_saved_motions += 1
         motion_output_dir = os.path.join(scene_output_dir, motion[:-15])
         os.makedirs(motion_output_dir, exist_ok=True)
+
+        # save motion sequence
+        np.savez(os.path.join(motion_output_dir, "motion_seq.npz"), fps=30,
+            gender=motion_seq['gender'],
+            trans=trans[:seq_end_idx],
+            root_orient=motion_seq['root_orient'][:seq_end_idx],
+            pose_body=motion_seq['pose_body'][:seq_end_idx],
+            betas=motion_seq['betas'],
+            joints=joints[:seq_end_idx],
+            joints_vel=motion_seq['joints_vel'][:seq_end_idx],
+            trans_vel=motion_seq['trans_vel'][:seq_end_idx],
+            root_orient_vel=motion_seq['root_orient_vel'][:seq_end_idx])
 
         # save collision labels
         if seq_end_idx == motion_seq['trans'].shape[0]:
