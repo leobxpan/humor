@@ -12,6 +12,8 @@ import numpy as np
 import trimesh
 
 import PIL.Image
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 from tqdm import tqdm
 
@@ -53,7 +55,7 @@ def world_to_map(xy, trav_map_size=2400, trav_map_resolution=0.01):
     axis = 0 if len(xy.shape) == 1 else 1
     return np.flip((np.array(xy) / trav_map_resolution + trav_map_size / 2.0)).astype(int)
 
-def is_person_in_scene(human_verts, scene_verts):
+def is_person_in_scene(human_verts, scene_verts, debug_vis=False):
     scene_2d = scene_verts[:, :2]
     human_2d = human_verts[:, :2]
 
@@ -63,19 +65,32 @@ def is_person_in_scene(human_verts, scene_verts):
     resolution = 64
 
     scene_img = np.zeros((resolution, resolution))
-    scene_2d = (scene_2d - scene_min) / (scene_max - scene_min)
+    scene_2d = (scene_2d - scene_min) * (resolution - 1) / (scene_max - scene_min)
     scene_2d = np.rint(scene_2d).astype(int)
     for i in range(scene_2d.shape[0]):
         scene_img[scene_2d[i, 0], scene_2d[i, 1]] = 1
 
     human_img = np.zeros((resolution, resolution))
-    human_2d = (human_2d - scene_min) / (scene_max - scene_min)
+    human_2d = (human_2d - scene_min) * (resolution - 1) / (scene_max - scene_min)
     human_2d = np.rint(human_2d).astype(int)
     for i in range(human_2d.shape[0]):
         human_img[human_2d[i, 0], human_2d[i, 1]] = 1
 
     union = np.logical_or(scene_img, human_img)
     diff = union - scene_img
+
+    if debug_vis:
+        plt.imshow(scene_img, cmap=cm.gray)
+        plt.savefig("scene.png")
+        plt.clf()
+
+        plt.imshow(union, cmap=cm.gray)
+        plt.savefig("union.png")
+        plt.clf()
+        
+        plt.imshow(diff, cmap=cm.gray)
+        plt.savefig("diff.png")
+        plt.clf()
 
     if diff.sum() == 0:
         return True
@@ -187,8 +202,8 @@ max_num_motions = 200
 min_num_motions = 30
 
 # parallelization
-num_workers = 30
-worker_id = 29 
+num_workers = 10
+worker_id = 9 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
 
@@ -208,6 +223,13 @@ with open(os.path.join(scene_root, "descending_scene_and_areas.pkl"), "rb") as f
 chosen_scenes = [scene for scene in descending_scenes_and_areas.keys() if descending_scenes_and_areas[scene] > min_area and descending_scenes_and_areas[scene] < max_area]
 chosen_scene_areas = [descending_scenes_and_areas[scene] for scene in chosen_scenes]
 all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_motions - min_num_motions) / (chosen_scene_areas[0] - chosen_scene_areas[-1]) for area in chosen_scene_areas]
+
+# existing_scenes = os.listdir(output_dir)
+# remaining_scenes = [scene for scene in chosen_scenes if scene not in existing_scenes]
+# remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
+# chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
+# chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
+# all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
 
 chosen_scenes = np.array(chosen_scenes)
 chosen_scene_areas = np.array(chosen_scene_areas)
@@ -275,7 +297,7 @@ for i in range(len(jobs)):
         
         for i in range(verts.shape[0]):
             in_penetration = check_if_valid(verts[i], scene_mesh)
-            valid_in_penetration = filter_floor_cols(verts[i], in_penetration, floor_buffer)
+            valid_in_penetration = filter_floor_cols(verts[i], in_penetration, rand_floor_height + floor_buffer)
             if valid_in_penetration.sum() >= num_col_verts_thresh:
                 seq_end_idx = i
                 break
@@ -328,7 +350,7 @@ for i in range(len(jobs)):
                 if seq_end_idx + 1 + i >= motion_seq['trans'].shape[0]:
                     break
                 addt_in_penetration = check_if_valid(verts[seq_end_idx + 1 + i], scene_mesh)
-                valid_addt_in_penetration = filter_floor_cols(verts[seq_end_idx + 1 + i], addt_in_penetration, floor_buffer)
+                valid_addt_in_penetration = filter_floor_cols(verts[seq_end_idx + 1 + i], addt_in_penetration, rand_floor_height + floor_buffer)
 
                 if valid_addt_in_penetration.sum() < num_col_verts_thresh:
                     continue

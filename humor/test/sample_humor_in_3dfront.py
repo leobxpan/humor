@@ -115,13 +115,13 @@ def is_person_in_scene(human_verts, floor_verts):
     resolution = 64
 
     floor_img = np.zeros((resolution, resolution))
-    floor_2d = (floor_2d - floor_min) / (floor_max - floor_min)
+    floor_2d = (floor_2d - floor_min) * (resolution - 1) / (floor_max - floor_min)
     floor_2d = np.rint(floor_2d).astype(int)
     for i in range(floor_2d.shape[0]):
         floor_img[floor_2d[i, 0], floor_2d[i, 1]] = 1
 
     human_img = np.zeros((resolution, resolution))
-    human_2d = (human_2d - floor_min) / (floor_max - floor_min)
+    human_2d = (human_2d - floor_min) * (resolution - 1) / (floor_max - floor_min)
     human_2d = np.rint(human_2d).astype(int)
     for i in range(human_2d.shape[0]):
         human_img[human_2d[i, 0], human_2d[i, 1]] = 1
