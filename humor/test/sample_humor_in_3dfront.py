@@ -10,6 +10,9 @@ import json
 
 import numpy as np
 
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
 import trimesh
 
 import torch
@@ -105,7 +108,7 @@ def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
 # 
 #     return (human_verts >= scene_bounds_min).all().item() and (human_verts <= scene_bounds_max).all().item()
 
-def is_person_in_scene(human_verts, floor_verts):
+def is_person_in_scene(human_verts, floor_verts, debug_vis=False):
     floor_2d = floor_verts[:, :2]
     human_2d = human_verts[:, :2]
 
@@ -128,6 +131,19 @@ def is_person_in_scene(human_verts, floor_verts):
 
     union = np.logical_or(floor_img, human_img)
     diff = union - floor_img
+
+    if debug_vis:
+        plt.imshow(scene_img, cmap=cm.gray)
+        plt.savefig("scene.png")
+        plt.clf()
+
+        plt.imshow(union, cmap=cm.gray)
+        plt.savefig("union.png")
+        plt.clf()
+        
+        plt.imshow(diff, cmap=cm.gray)
+        plt.savefig("diff.png")
+        plt.clf()
 
     if diff.sum() == 0:
         return True

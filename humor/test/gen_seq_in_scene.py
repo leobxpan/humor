@@ -55,44 +55,14 @@ def world_to_map(xy, trav_map_size=2400, trav_map_resolution=0.01):
     axis = 0 if len(xy.shape) == 1 else 1
     return np.flip((np.array(xy) / trav_map_resolution + trav_map_size / 2.0)).astype(int)
 
-def is_person_in_scene(human_verts, scene_verts, debug_vis=False):
+def is_person_in_scene(human_verts, scene_verts):
     scene_2d = scene_verts[:, :2]
     human_2d = human_verts[:, :2]
 
-    scene_min = scene_2d.min(axis=0) - 0.5
-    scene_max = scene_2d.max(axis=0) + 0.5
+    scene_min = scene_2d.min(axis=0)
+    scene_max = scene_2d.max(axis=0)
 
-    resolution = 64
-
-    scene_img = np.zeros((resolution, resolution))
-    scene_2d = (scene_2d - scene_min) * (resolution - 1) / (scene_max - scene_min)
-    scene_2d = np.rint(scene_2d).astype(int)
-    for i in range(scene_2d.shape[0]):
-        scene_img[scene_2d[i, 0], scene_2d[i, 1]] = 1
-
-    human_img = np.zeros((resolution, resolution))
-    human_2d = (human_2d - scene_min) * (resolution - 1) / (scene_max - scene_min)
-    human_2d = np.rint(human_2d).astype(int)
-    for i in range(human_2d.shape[0]):
-        human_img[human_2d[i, 0], human_2d[i, 1]] = 1
-
-    union = np.logical_or(scene_img, human_img)
-    diff = union - scene_img
-
-    if debug_vis:
-        plt.imshow(scene_img, cmap=cm.gray)
-        plt.savefig("scene.png")
-        plt.clf()
-
-        plt.imshow(union, cmap=cm.gray)
-        plt.savefig("union.png")
-        plt.clf()
-        
-        plt.imshow(diff, cmap=cm.gray)
-        plt.savefig("diff.png")
-        plt.clf()
-
-    if diff.sum() == 0:
+    if np.all(human_2d >= scene_min) and np.all(human_2d <= scene_max):
         return True
     else:
         return False
@@ -202,7 +172,7 @@ max_num_motions = 200
 min_num_motions = 30
 
 # parallelization
-num_workers = 10
+num_workers = 20
 worker_id = 9 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
@@ -224,12 +194,21 @@ chosen_scenes = [scene for scene in descending_scenes_and_areas.keys() if descen
 chosen_scene_areas = [descending_scenes_and_areas[scene] for scene in chosen_scenes]
 all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_motions - min_num_motions) / (chosen_scene_areas[0] - chosen_scene_areas[-1]) for area in chosen_scene_areas]
 
-# existing_scenes = os.listdir(output_dir)
-# remaining_scenes = [scene for scene in chosen_scenes if scene not in existing_scenes]
-# remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
-# chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
-# chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
-# all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
+existing_scenes = os.listdir(output_dir)
+one_floor_scenes = []
+for scene in existing_scenes:
+    scene_dir = os.path.join(output_dir, scene)
+    if not os.path.isdir(scene_dir): continue
+    with open(os.path.join(scene_root, scene, "floors.txt"), "r") as f:
+        floor_heights = sorted(list(map(float, f.readlines())))
+    if len(floor_heights) == 1 and np.abs(floor_heights[0]) <= 0.02:
+        one_floor_scenes.append(scene)
+
+remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
+remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
+chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
+chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
+all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
 
 chosen_scenes = np.array(chosen_scenes)
 chosen_scene_areas = np.array(chosen_scene_areas)
@@ -243,6 +222,7 @@ for i in range(len(jobs)):
     scene = jobs[i]
     scene_mesh = trimesh.exchange.load.load(os.path.join(scene_root, scene, "watertight", "mesh_z_up.obj"))
     scene_mesh = scene_mesh.simplify_quadratic_decimation(1e5)                  # dowmsample scene mesh to speed up collision check
+    scene_mesh.export(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
     scene_output_dir = os.path.join(output_dir, scene)
 
     if not os.path.isdir(scene_output_dir):
@@ -257,9 +237,8 @@ for i in range(len(jobs)):
         floor_heights = np.array(sorted(list(map(float, f.readlines()))))
     
     num_motions = num_motion_jobs[i]
-    num_saved_motions = 0
     num_checked_motions = 0
-    while num_saved_motions < num_motions:
+    while len(os.listdir(scene_output_dir)) < num_motions:
         num_checked_motions += 1
         if num_checked_motions >= num_motions * 20:
             break
@@ -310,7 +289,6 @@ for i in range(len(jobs)):
         if seq_end_idx < min_seq_len:                                   # continue to next motion if sequence is too short
             continue
 
-        num_saved_motions += 1
         motion_output_dir = os.path.join(scene_output_dir, motion[:-15])
         os.makedirs(motion_output_dir, exist_ok=True)
 
