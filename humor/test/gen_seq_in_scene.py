@@ -172,8 +172,8 @@ max_num_motions = 200
 min_num_motions = 30
 
 # parallelization
-num_workers = 20
-worker_id = 9 
+num_workers = 1
+worker_id = 0 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
 
@@ -194,21 +194,21 @@ chosen_scenes = [scene for scene in descending_scenes_and_areas.keys() if descen
 chosen_scene_areas = [descending_scenes_and_areas[scene] for scene in chosen_scenes]
 all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_motions - min_num_motions) / (chosen_scene_areas[0] - chosen_scene_areas[-1]) for area in chosen_scene_areas]
 
-existing_scenes = os.listdir(output_dir)
-one_floor_scenes = []
-for scene in existing_scenes:
-    scene_dir = os.path.join(output_dir, scene)
-    if not os.path.isdir(scene_dir): continue
-    with open(os.path.join(scene_root, scene, "floors.txt"), "r") as f:
-        floor_heights = sorted(list(map(float, f.readlines())))
-    if len(floor_heights) == 1 and np.abs(floor_heights[0]) <= 0.02:
-        one_floor_scenes.append(scene)
+# existing_scenes = os.listdir(output_dir)
+# one_floor_scenes = []
+# for scene in existing_scenes:
+#     scene_dir = os.path.join(output_dir, scene)
+#     if not os.path.isdir(scene_dir): continue
+#     with open(os.path.join(scene_root, scene, "floors.txt"), "r") as f:
+#         floor_heights = sorted(list(map(float, f.readlines())))
+#     if len(floor_heights) == 1 and np.abs(floor_heights[0]) <= 0.02:
+#         one_floor_scenes.append(scene)
 
-remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
-remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
-chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
-chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
-all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
+# remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
+# remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
+# chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
+# chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
+# all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
 
 chosen_scenes = np.array(chosen_scenes)
 chosen_scene_areas = np.array(chosen_scene_areas)
@@ -221,6 +221,7 @@ num_motion_jobs = all_num_motions[cur_scene_inds]
 for i in range(len(jobs)):
     scene = jobs[i]
     scene_mesh = trimesh.exchange.load.load(os.path.join(scene_root, scene, "watertight", "mesh_z_up.obj"))
+    #scene_mesh = trimesh.exchange.load.load(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
     scene_mesh = scene_mesh.simplify_quadratic_decimation(1e5)                  # dowmsample scene mesh to speed up collision check
     scene_mesh.export(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
     scene_output_dir = os.path.join(output_dir, scene)
