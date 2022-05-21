@@ -4,12 +4,19 @@ sys.path.append(os.path.join(cur_file_path, '..'))
 
 import glob
 
+from collections import OrderedDict
+
+import json
+
 import pickle
 
 import torch
 
 import numpy as np
 import trimesh
+
+import pybullet_data
+import pybullet as p
 
 import PIL.Image
 import matplotlib.pyplot as plt
@@ -26,16 +33,28 @@ SMPLH_PATH = "/orion/u/bxpan/exoskeleton/humor/body_models/smplh"
 MALE_BM_PATH = os.path.join(SMPLH_PATH, "male/model.npz")
 FEMALE_BM_PATH = os.path.join(SMPLH_PATH, "female/model.npz")
 
-def check_if_valid(vertices, scene):
-    # vertices: bs(1) X N X 3
-    in_penetration = check_mesh_contains(scene, vertices)
-    return in_penetration
+with open('/orion/u/bxpan/exoskeleton/exoskeleton/data_utils/smpl_vert_segmentation.json','r') as fp:
+    part_info = OrderedDict(json.load(fp))
+num_verts = np.zeros((len(part_info.keys()), 6890)) - 1
+for i, (k, v) in enumerate(part_info.items()):
+    temp_arr = np.zeros(6890) - 1
+    temp_arr[v] = np.arange(len(v)) + 1
+    num_verts[i] = temp_arr
+num_verts = num_verts.astype(int)
 
-def filter_floor_cols(human_verts, in_penetration, max_floor_height):
-    human_verts_above_floor = human_verts[:, 2] > max_floor_height
-    valid_in_penetration = np.logical_and(human_verts_above_floor, in_penetration)
+# def check_if_valid(vertices, scene):
+#     # vertices: bs(1) X N X 3
+#     in_penetration = check_mesh_contains(scene, vertices)
+#     return in_penetration
+# 
+# def filter_floor_cols(human_verts, in_penetration, max_floor_height):
+#     human_verts_above_floor = human_verts[:, 2] > max_floor_height
+#     valid_in_penetration = np.logical_and(human_verts_above_floor, in_penetration)
+# 
+#     return valid_in_penetration
 
-    return valid_in_penetration
+def filter_floor_cols(pene, max_floor_height):
+    return [vertex for vertex in pene if vertex[2] > max_floor_height]
 
 def map_to_world(xy, trav_map_size=2400, trav_map_resolution=0.01):
     """
@@ -67,13 +86,12 @@ def is_person_in_scene(human_verts, scene_verts):
     else:
         return False
 
-def process_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False, dataset_type="map_10", device="cpu"):
-    if isinstance(in_penetration, np.ndarray):
-        in_penetration = torch.from_numpy(in_penetration).to(device)
-        vertices = torch.from_numpy(vertices)
-        joints = torch.from_numpy(joints)
-    verts_in_penetration = vertices[in_penetration, :]
-    verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
+def process_penetration(pene_pts, human_verts, joints, counts_thresh=0, debug=False, dataset_type="map_10", device="cpu"):
+    if isinstance(pene_pts, np.ndarray):
+        human_verts = torch.from_numpy(human_verts).to(device)
+        joints = torch.from_numpy(joints).to(device)
+        pene_pts = torch.from_numpy(pene_pts).to(joints)
+    verts_dist_to_joints = torch.cdist(pene_pts, joints)
     penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
     unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
 
@@ -82,10 +100,9 @@ def process_penetration(in_penetration, vertices, joints, counts_thresh=100, deb
     new_counts = torch.zeros_like(unique_joints)
     for i in range(unique_joints.shape[0]):
         new_counts[i] = counts[(unique_penetration_joints == unique_joints[i]).nonzero(as_tuple=True)[0]].sum()
-    #print("counts:", counts)
     joints_mask = new_counts >= counts_thresh
     unique_joints = torch.masked_select(unique_joints, joints_mask)
-
+ 
     if debug:
         if unique_joints.nelement() == 0:
             unique_joints = torch.tensor([100]).to(vertices.device)
@@ -97,6 +114,37 @@ def process_penetration(in_penetration, vertices, joints, counts_thresh=100, deb
         if unique_joints.nelement() == 0:
             unique_joints = torch.tensor([100]).to(vertices.device)
         return unique_joints
+    
+# deprocess_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False, dataset_type="map_10", device="cpu"):
+#   if isinstance(in_penetration, np.ndarray):
+#       in_penetration = torch.from_numpy(in_penetration).to(device)
+#       vertices = torch.from_numpy(vertices)
+#       joints = torch.from_numpy(joints)
+#   verts_in_penetration = vertices[in_penetration, :]
+#   verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
+#   penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
+#   unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
+# 
+#   unique_penetration_joints = map_joints(unique_penetration_joints, dataset_type)
+#   unique_joints = torch.unique(unique_penetration_joints, return_counts=False)
+#   new_counts = torch.zeros_like(unique_joints)
+#   for i in range(unique_joints.shape[0]):
+#       new_counts[i] = counts[(unique_penetration_joints == unique_joints[i]).nonzero(as_tuple=True)[0]].sum()
+#   #print("counts:", counts)
+#   joints_mask = new_counts >= counts_thresh
+#   unique_joints = torch.masked_select(unique_joints, joints_mask)
+# 
+#   if debug:
+#       if unique_joints.nelement() == 0:
+#           unique_joints = torch.tensor([100]).to(vertices.device)
+#           verts_mask = torch.tensor([]).to(vertices.device)
+#       else:
+#           verts_mask = torch.tensor([1 if penetration_joint in unique_joints else 0 for penetration_joint in map_joints(penetration_joints, dataset_type)], device=verts_in_penetration.device).bool()
+#       return unique_joints, verts_in_penetration[verts_mask]
+#   else:
+#       if unique_joints.nelement() == 0:
+#           unique_joints = torch.tensor([100]).to(vertices.device)
+#       return unique_joints
 
 def map_joints(penetration_label, dataset_type="map_10"):
     """
@@ -155,11 +203,12 @@ def map_joints(penetration_label, dataset_type="map_10"):
         raise ValueError('Unsupported dataset type: {}'.format(dataset_type))
 
 scene_root = "/orion/group/Mp3d_Gibson_scenes"
-motion_root = "/orion/group/Exoskeleton_humor_motions"
+motion_root = "/orion/group/Exoskeleton_humor_motions_walk_only"
+glb_root = "/orion/group/Mp3d_Gibson_habitat"
+
 all_motions = sorted(os.listdir(motion_root))
 
-output_dir = "/orion/group/Mp3d_Gibson_motions"
-obj_output_dir = "test_obj"
+output_dir = "/orion/group/Mp3d_Gibson_motions_new"
 
 device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -168,29 +217,30 @@ max_area = 1.5e6
 min_area = 0
 
 # number of motions sampled for largest and smallest scenes (to linspace from)
-max_num_motions = 200
-min_num_motions = 30
+max_num_motions = 250
+min_num_motions = 50
 
 # parallelization
-num_workers = 1
-worker_id = 0 
+num_workers = 3
+worker_id = 2 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
 
-num_col_verts_thresh = 10           # when more than 10 vertices colliding, say it's a collision sequence
+num_col_verts_thresh = 2            # when more than 10 vertices colliding, say it's a collision sequence
 
 min_seq_len = 30                    # minimum sequence length for it to be considered
 
 addt_col_hor = 10                   # check for 10 time steps after the actual collision for additional collision labels
 
 # debug visualizations
-vis_traj = False
-save_obj = False
+vis_traj = False 
+save_obj = False 
 
 with open(os.path.join(scene_root, "descending_scene_and_areas.pkl"), "rb") as f:
     descending_scenes_and_areas = pickle.load(f)
 
 chosen_scenes = [scene for scene in descending_scenes_and_areas.keys() if descending_scenes_and_areas[scene] > min_area and descending_scenes_and_areas[scene] < max_area]
+chosen_scenes = [scene for scene in chosen_scenes if scene+".glb" in os.listdir(glb_root)]
 chosen_scene_areas = [descending_scenes_and_areas[scene] for scene in chosen_scenes]
 all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_motions - min_num_motions) / (chosen_scene_areas[0] - chosen_scene_areas[-1]) for area in chosen_scene_areas]
 
@@ -204,11 +254,12 @@ all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_
 #     if len(floor_heights) == 1 and np.abs(floor_heights[0]) <= 0.02:
 #         one_floor_scenes.append(scene)
 
-# remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
-# remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
-# chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
-# chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
-# all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
+#remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
+remaining_scenes = ["Seward", "Soldier", "Sasakwa"]
+remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
+chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
+chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
+all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
 
 chosen_scenes = np.array(chosen_scenes)
 chosen_scene_areas = np.array(chosen_scene_areas)
@@ -220,11 +271,19 @@ num_motion_jobs = all_num_motions[cur_scene_inds]
 
 for i in range(len(jobs)):
     scene = jobs[i]
-    scene_mesh = trimesh.exchange.load.load(os.path.join(scene_root, scene, "watertight", "mesh_z_up.obj"))
-    #scene_mesh = trimesh.exchange.load.load(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
-    scene_mesh = scene_mesh.simplify_quadratic_decimation(1e5)                  # dowmsample scene mesh to speed up collision check
-    scene_mesh.export(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
+    scene_mesh_path = os.path.join(scene_root, scene, "mesh_z_up.obj")
+    scene_mesh = trimesh.exchange.load.load(scene_mesh_path)
+    #scene_mesh = scene_mesh.simplify_quadratic_decimation(1e5)                  # dowmsample scene mesh to speed up collision check
+    #scene_mesh.export(os.path.join(scene_root, scene, "watertight", "simple_1e5.obj"))
     scene_output_dir = os.path.join(output_dir, scene)
+
+    scaling  = [1, 1, 1]
+    physicsClient = p.connect(p.DIRECT)#or p.DIRECT for non-graphical version
+    p.setAdditionalSearchPath(pybullet_data.getDataPath()) #optionally
+    p.setGravity(0,0,-10)
+    
+    collisionId = p.createCollisionShape(p.GEOM_MESH, fileName=scene_mesh_path, meshScale=scaling, flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+    visualId = -1
 
     if not os.path.isdir(scene_output_dir):
         os.makedirs(scene_output_dir)
@@ -271,18 +330,52 @@ for i in range(len(jobs)):
         bm_world = male_bm if motion_seq['gender'][0] == 'male' else female_bm
         verts, faces = gen_obj_from_motion_seq(motion_seq["root_orient"], motion_seq["pose_body"], trans, motion_seq["betas"], bm_world, device)
 
+        faces_str = {}
+        for idx,(k,v) in enumerate(part_info.items()):
+            part_str = ""
+            for abc in faces:
+                verts_f = num_verts[idx][abc]
+                if -1 in verts_f: continue
+                part_str += f"f {verts_f[0]} {verts_f[1]} {verts_f[2]}\n"
+            faces_str[k] = part_str
+
         # collision checking
         person_out_of_scene_flag = False
         seq_end_idx = motion_seq['trans'].shape[0]                      # step of collision
         
         for i in range(verts.shape[0]):
-            in_penetration = check_if_valid(verts[i], scene_mesh)
-            valid_in_penetration = filter_floor_cols(verts[i], in_penetration, rand_floor_height + floor_buffer)
-            if valid_in_penetration.sum() >= num_col_verts_thresh:
+            vertices = verts[i]
+
+            pene = []
+            for idx,(k,v) in enumerate(part_info.items()):
+                verts_str = ""
+                for x, y, z in vertices[v]:
+                    verts_str += f"v {x: .3f} {y: .3f} {z: .3f}\n"
+
+                verts_str += faces_str[k]
+                with open(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], i, idx), "w") as fp:
+                    fp.write(verts_str)
+
+                #partId = p.createCollisionShape(p.GEOM_MESH, vertices=vertices[v])
+                partId = p.createCollisionShape(p.GEOM_MESH, fileName=f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], i, idx))
+
+                pts = p.getClosestPoints(bodyA=-1,
+                                     bodyB=-1,
+                                     distance=0,
+                                     collisionShapeA=collisionId,
+                                     collisionShapeB=partId)
+                pene += [k[5] for k in pts]
+
+                p.removeCollisionShape(partId)
+                os.remove(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], i, idx))
+
+            pene = filter_floor_cols(pene, rand_floor_height + floor_buffer)
+            pene = np.array(pene)
+            if len(pene) >= num_col_verts_thresh:
                 seq_end_idx = i
                 break
             else:
-                if not is_person_in_scene(verts[i], scene_mesh.vertices):
+                if not is_person_in_scene(vertices, scene_mesh.vertices):
                     person_out_of_scene_flag = True
                     seq_end_idx = i
                     break
@@ -312,12 +405,12 @@ for i in range(len(jobs)):
             if person_out_of_scene_flag:
                 penetration_label = torch.tensor([100], device=device)
             else:
-                penetration_label = process_penetration(valid_in_penetration, verts[seq_end_idx], \
+                penetration_label = process_penetration(pene, verts[seq_end_idx], \
                     joints[seq_end_idx], debug=False, counts_thresh=0, device=device)
                 
                 # collision spot
-                col_verts = verts[seq_end_idx][valid_in_penetration]
-                np.save(os.path.join(motion_output_dir, "col_verts.npy"), col_verts)
+                #col_verts = verts[seq_end_idx][valid_in_penetration]
+                np.save(os.path.join(motion_output_dir, "col_verts.npy"), pene)
         np.save(os.path.join(motion_output_dir, "penetration_label.npy"), penetration_label.cpu().numpy())
 
         # additional collision labels
@@ -328,22 +421,62 @@ for i in range(len(jobs)):
             for i in range(addt_col_hor):
                 if seq_end_idx + 1 + i >= motion_seq['trans'].shape[0]:
                     break
-                addt_in_penetration = check_if_valid(verts[seq_end_idx + 1 + i], scene_mesh)
-                valid_addt_in_penetration = filter_floor_cols(verts[seq_end_idx + 1 + i], addt_in_penetration, rand_floor_height + floor_buffer)
 
-                if valid_addt_in_penetration.sum() < num_col_verts_thresh:
+                pene = []
+                for idx,(k,v) in enumerate(part_info.items()):
+                    verts_str = ""
+                    for x, y, z in verts[seq_end_idx + 1 + i][v]:
+                        verts_str += f"v {x: .3f} {y: .3f} {z: .3f}\n"
+
+                    verts_str += faces_str[k]
+                    with open(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], seq_end_idx + 1 + i, idx), "w") as fp:
+                        fp.write(verts_str)
+
+                    #partId = p.createCollisionShape(p.GEOM_MESH, vertices=vertices[v])
+                    partId = p.createCollisionShape(p.GEOM_MESH, fileName=f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], seq_end_idx + 1 + i, idx))
+
+                    pts = p.getClosestPoints(bodyA=-1,
+                                         bodyB=-1,
+                                         distance=0,
+                                         collisionShapeA=collisionId,
+                                         collisionShapeB=partId)
+                    pene += [k[5] for k in pts]
+
+                    p.removeCollisionShape(partId)
+                    os.remove(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion[:-15], seq_end_idx + 1 + i, idx))
+
+                pene = filter_floor_cols(pene, rand_floor_height + floor_buffer)
+                pene = np.array(pene)
+
+                if len(pene) < num_col_verts_thresh:
                     continue
                 else:
                     if not is_person_in_scene(verts[seq_end_idx + 1 + i], scene_mesh.vertices):
                         break
                     else:
-                        addt_penetration_label = process_penetration(valid_addt_in_penetration, \
-                            verts[seq_end_idx + 1 + i], joints[seq_end_idx + 1 + i], debug=False, counts_thresh=0)
-                        addt_col_verts = verts[seq_end_idx + 1 + i][valid_addt_in_penetration]
+                        addt_penetration_label = process_penetration(pene, verts[seq_end_idx + 1 + i], \
+                            joints[seq_end_idx + 1 + i], debug=False, counts_thresh=0, device=device)
 
                         all_addt_penetration_labels.append(addt_penetration_label.cpu().numpy())
-                        all_addt_col_verts.append(addt_col_verts)
+                        all_addt_col_verts.append(pene)
                         addt_time_steps.append(i)
+
+                # addt_in_penetration = check_if_valid(verts[seq_end_idx + 1 + i], scene_mesh)
+                # valid_addt_in_penetration = filter_floor_cols(verts[seq_end_idx + 1 + i], addt_in_penetration, rand_floor_height + floor_buffer)
+
+                # if valid_addt_in_penetration.sum() < num_col_verts_thresh:
+                #     continue
+                # else:
+                #     if not is_person_in_scene(verts[seq_end_idx + 1 + i], scene_mesh.vertices):
+                #         break
+                #     else:
+                #         addt_penetration_label = process_penetration(valid_addt_in_penetration, \
+                #             verts[seq_end_idx + 1 + i], joints[seq_end_idx + 1 + i], debug=False, counts_thresh=0)
+                #         addt_col_verts = verts[seq_end_idx + 1 + i][valid_addt_in_penetration]
+
+                #         all_addt_penetration_labels.append(addt_penetration_label.cpu().numpy())
+                #         all_addt_col_verts.append(addt_col_verts)
+                #         addt_time_steps.append(i)
 
         if addt_time_steps:
             for i in range(len(addt_time_steps)):
@@ -360,10 +493,11 @@ for i in range(len(jobs)):
     
         if vis_traj:
             root_traj_2d = joints[:, 0, :2]
-            root_traj_2d = world_to_map(root_traj_2d) 
+            root_traj_2d = world_to_map(root_traj_2d, trav_map_size=trav_map.shape[0]) 
             traverse_map_with_traj = np.copy(trav_map)
             traverse_map_with_traj = np.repeat(traverse_map_with_traj[:, :, np.newaxis], 3, axis=2)
             traverse_map_with_traj[root_traj_2d[:, 0], root_traj_2d[:, 1], :] = np.array([255, 0, 0])
             im = PIL.Image.fromarray(traverse_map_with_traj)
             im.save(os.path.join(motion_output_dir, "traj.png"))
-    
+
+    p.disconnect(physicsClient)
