@@ -354,7 +354,7 @@ def eval_sampling(model, test_dataset, test_loader, device,
             x_pred_dict['joints'] = x_pred_dict['joints'].view(x_pred_dict['joints'].shape[0], x_pred_dict['joints'].shape[1], -1, 3)
             end_idx = eval_qual_samp_len
 
-            if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=30, check_thresh=0.2):
+            if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=100, check_thresh=0.5):
                 continue
 
             # visualize and save

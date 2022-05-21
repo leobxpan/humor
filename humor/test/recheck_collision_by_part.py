@@ -18,7 +18,7 @@ import torch
 import numpy as np
 
 from body_model.body_model import BodyModel
-from utils import gen_obj_from_motion_seq, write_to_obj
+from geom_utils import gen_obj_from_motion_seq, write_to_obj
 
 def is_person_in_scene(human_verts, scene_verts):
     scene_2d = scene_verts[:, :2]

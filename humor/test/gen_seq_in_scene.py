@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from libmesh.inside_mesh import check_mesh_contains
 
-from utils import gen_obj_from_motion_seq, write_to_obj
+from geom_utils import gen_obj_from_motion_seq, write_to_obj
 from body_model.body_model import BodyModel
 
 SMPLH_PATH = "/orion/u/bxpan/exoskeleton/humor/body_models/smplh"
