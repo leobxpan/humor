@@ -43,7 +43,7 @@ FEMALE_BM_PATH = os.path.join(SMPLH_PATH, "female/model.npz")
 
 floor_buffer = 0.1
 
-device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+device = torch.device("cpu")
 
 with open('/orion/u/bxpan/exoskeleton/exoskeleton/data_utils/smpl_vert_segmentation.json','r') as fp:
     part_info = OrderedDict(json.load(fp))
@@ -57,6 +57,8 @@ num_verts = num_verts.astype(int)
 for scene in os.listdir(motion_root):
     #if scene != "Albertville": continue
     #if scene != "Uxmj2M2itWa": continue
+    #if scene != "Convoy": continue
+    #if scene != "Samuels": continue
     scene_dir = os.path.join(motion_root, scene)
     if os.path.isdir(scene_dir) and scene != "pickles":
         scene_mesh_path = os.path.join(scene_root, scene, "mesh_z_up.obj")
@@ -73,6 +75,8 @@ for scene in os.listdir(motion_root):
         for motion in os.listdir(scene_dir):
             #if motion != "BioMotionLab_NTroje_rub018_0029_jumping2_poses_64_frames_30_fps_b34243seq0": continue
             #if motion != "KIT_317_turn_right02_poses_130_frames_30_fps_b31318seq0": continue
+            #if motion != "CMU_79_79_47_poses_492_frames_30_fps_b21554seq0": continue
+            #if motion != "CMU_136_136_09_poses_225_frames_30_fps_b10766seq0": continue
             motion_dir = os.path.join(scene_dir, motion)
 
             motion_seq = np.load(os.path.join(motion_dir, "motion_seq.npz"))
@@ -133,7 +137,7 @@ for scene in os.listdir(motion_root):
                     os.remove(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion, i, idx))
 
                 pene = filter_floor_cols(pene, floor_height + floor_buffer)
-                if len(pene) > 0:
+                if len(pene) > 5:
                     seq_end_idx = i
                     break
                 else:
@@ -148,6 +152,6 @@ for scene in os.listdir(motion_root):
                 # print("faulty collision detection at: {}. original end_idx {}; should be {}".format(motion_dir, orig_seq_end_idx, seq_end_idx))
                 # write_to_obj(f"test%d.obj"%(seq_end_idx), vertices, faces)
                 # pene = trimesh.Trimesh(vertices=pene)
-                # pene.export("pene.obj")
+                # pene.export("pene_scene.obj")
 
         p.disconnect(physicsClient)
