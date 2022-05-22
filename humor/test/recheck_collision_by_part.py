@@ -44,7 +44,8 @@ FEMALE_BM_PATH = os.path.join(SMPLH_PATH, "female/model.npz")
 
 floor_buffer = 0.1
 
-device = torch.device("cpu")
+#device = torch.device("cpu")
+device = torch.device("cuda:0")
 
 with open('/orion/u/bxpan/exoskeleton/exoskeleton/data_utils/smpl_vert_segmentation.json','r') as fp:
     part_info = OrderedDict(json.load(fp))
@@ -58,8 +59,8 @@ num_verts = num_verts.astype(int)
 for scene in os.listdir(motion_root):
     #if scene != "Albertville": continue
     #if scene != "Uxmj2M2itWa": continue
-    #if scene != "Convoy": continue
-    if scene != "Samuels": continue
+    if scene != "Convoy": continue
+    #if scene != "Samuels": continue
     #if scene != "Stilwell": continue
     scene_dir = os.path.join(motion_root, scene)
     if os.path.isdir(scene_dir) and scene != "pickles":
@@ -77,8 +78,8 @@ for scene in os.listdir(motion_root):
         for motion in os.listdir(scene_dir):
             #if motion != "BioMotionLab_NTroje_rub018_0029_jumping2_poses_64_frames_30_fps_b34243seq0": continue
             #if motion != "KIT_317_turn_right02_poses_130_frames_30_fps_b31318seq0": continue
-            #if motion != "CMU_79_79_47_poses_492_frames_30_fps_b21554seq0": continue
-            if motion != "CMU_136_136_09_poses_225_frames_30_fps_b10766seq0": continue
+            if motion != "CMU_79_79_47_poses_492_frames_30_fps_b21554seq0": continue
+            #if motion != "CMU_136_136_09_poses_225_frames_30_fps_b10766seq0": continue
             #if motion != "BioMotionLab_NTroje_rub114_0017_lifting_light1_poses_138_frames_30_fps_b5851seq0": continue
             motion_dir = os.path.join(scene_dir, motion)
 
@@ -135,7 +136,7 @@ for scene in os.listdir(motion_root):
                                          distance=0,
                                          collisionShapeA=collisionId,
                                          collisionShapeB=partId)
-                    pene += [k[5] for k in pts]
+                    pene += [k[6] for k in pts]
 
                     p.removeCollisionShape(partId)
                     os.remove(f"/tmp/temp_obj_%s_%s_%d_%d.obj"%(scene, motion, i, idx))
