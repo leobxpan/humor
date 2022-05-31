@@ -56,7 +56,11 @@ def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
     root_trans = motion_seq["joints"][0, :, 0, :]
 
     dot_products = []
-    for t in range(end_idx-2, end_idx-2-check_hor, -1):
+
+    end_check_idx = end_idx - 2 - check_hor
+    if end_check_idx < -1:
+        end_check_idx = -1
+    for t in range(end_idx-2, end_check_idx, -1):
         root_ori_t = root_ori[t]
         root_ori_t_x = -root_ori_t[:, 0]
         root_ori_t_y = root_ori_t[:, 2]
@@ -354,7 +358,7 @@ def eval_sampling(model, test_dataset, test_loader, device,
             x_pred_dict['joints'] = x_pred_dict['joints'].view(x_pred_dict['joints'].shape[0], x_pred_dict['joints'].shape[1], -1, 3)
             end_idx = eval_qual_samp_len
 
-            if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=100, check_thresh=0.5):
+            if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=eval_qual_samp_len, check_thresh=0.3):
                 continue
 
             # visualize and save

@@ -203,12 +203,12 @@ def map_joints(penetration_label, dataset_type="map_10"):
         raise ValueError('Unsupported dataset type: {}'.format(dataset_type))
 
 scene_root = "/orion/group/Mp3d_Gibson_scenes"
-motion_root = "/orion/group/Exoskeleton_humor_motions_walk_only"
+motion_root = "/scr/bxpan/Exoskeleton_humor_motions_walk_only_clean"
 glb_root = "/orion/group/Mp3d_Gibson_habitat"
 
 all_motions = sorted(os.listdir(motion_root))
 
-output_dir = "/orion/group/Mp3d_Gibson_motions_new"
+output_dir = "/scr/bxpan/Mp3d_Gibson_motions_walk_only_clean"
 
 device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -221,8 +221,8 @@ max_num_motions = 250
 min_num_motions = 50
 
 # parallelization
-num_workers = 3
-worker_id = 2 
+num_workers = 12 
+worker_id = 11 
 
 floor_buffer = 0.1                  # 10cm buffer to avoid checking collisions with floor
 
@@ -233,8 +233,8 @@ min_seq_len = 30                    # minimum sequence length for it to be consi
 addt_col_hor = 10                   # check for 10 time steps after the actual collision for additional collision labels
 
 # debug visualizations
-vis_traj = False 
-save_obj = False 
+vis_traj = False
+save_obj = False
 
 with open(os.path.join(scene_root, "descending_scene_and_areas.pkl"), "rb") as f:
     descending_scenes_and_areas = pickle.load(f)
@@ -255,11 +255,11 @@ all_num_motions = [min_num_motions + (area - chosen_scene_areas[-1]) * (max_num_
 #         one_floor_scenes.append(scene)
 
 #remaining_scenes = [scene for scene in chosen_scenes if scene not in one_floor_scenes]
-remaining_scenes = ["Seward", "Soldier", "Sasakwa"]
-remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
-chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
-chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
-all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
+# remaining_scenes = ["Seward", "Soldier", "Sasakwa"]
+# remaining_inds = [chosen_scenes.index(scene) for scene in remaining_scenes]
+# chosen_scenes = [chosen_scenes[idx] for idx in remaining_inds]
+# chosen_scene_areas = [chosen_scene_areas[idx] for idx in remaining_inds]
+# all_num_motions = [all_num_motions[idx] for idx in remaining_inds]
 
 chosen_scenes = np.array(chosen_scenes)
 chosen_scene_areas = np.array(chosen_scene_areas)
@@ -305,7 +305,10 @@ for i in range(len(jobs)):
 
         rand_motion_idx = np.random.randint(0, len(all_motions))
         motion = all_motions[rand_motion_idx]
-        motion_seq = np.load(os.path.join(motion_root, motion))
+        try:
+            motion_seq = np.load(os.path.join(motion_root, motion))
+        except:
+            continue
     
         rand_floor_idx = np.random.randint(0, len(trav_maps))
         trav_map = trav_maps[rand_floor_idx]
