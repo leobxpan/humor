@@ -6,3 +6,6 @@ checkpoints
 out
 *.zip
 *.obj
+
+humor/smplx_models/
+humor/vposer_v1_0/

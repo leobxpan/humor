@@ -1,3 +1,4 @@
+
 import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
@@ -8,142 +9,16 @@ import numpy as np
 import torch
 from torchvision import transforms, utils
 
+from datasets.amass_utils import TRAIN_DATASETS, TEST_DATASETS, VAL_DATASETS, SPLITS, SPLIT_BY, ROT_REPS
+from datasets.amass_utils import CONTACT_INDS, NUM_BODY_JOINTS
+from datasets.amass_utils import RETURN_CONFIGS
+from datasets.amass_utils import data_name_list, data_dim
+
 from utils.logging import Logger
 from torch.utils.data import Dataset, DataLoader
-from body_model.utils import SMPL_JOINTS, axisangle2matrots, matrot2axisangle
+from body_model.utils import SMPL_JOINTS
 from utils.torch import copy2cpu as c2c
-from utils.transforms import batch_rodrigues, rot6d_to_rotmat, compute_world2aligned_joints_mat
-
-#TRAIN_DATASETS = ['CMU', 'MPI_Limits', 'TotalCapture', 'Eyes_Japan_Dataset', 'KIT', 'BioMotionLab_NTroje', 'BMLmovi', 
-#                    'EKUT', 'ACCAD']
-#TEST_DATASETS = ['Transitions_mocap', 'HumanEva']
-#VAL_DATASETS = ['MPI_HDM05', 'SFU', 'MPI_mosh']
-TRAIN_DATASETS = ['bedroom0122', 'classroom0219', 'kitchen0214', 'livingroom0129', 'middle_hall0113', 'seminar_room0_0221', 'storeroom0217', 
-    'bedroom0123', 'dormitory0218', 'lab0220', 'livingroom0210', 'office0110', 'seminar_room1_0219', 'bedroom0210', 'garden0214']
-TEST_DATASETS = ['library0219', 'meetingroom0220']
-VAL_DATASETS = ['seminar_room0_0219', 'seminar_room1_0221']
-
-SPLITS = ['train', 'val', 'test', 'custom']
-SPLIT_BY = [ 
-             'single',   # the data path is a single .npz file. Don't split: train and test are same
-             'sequence', # the data paths are directories of subjects. Collate and split by sequence.
-             'subject',  # the data paths are directories of datasets. Collate and split by subject.
-             'dataset'   # a single data path to the amass data root is given. The predefined datasets will be used for each split.
-            ]
-
-ROT_REPS = ['mat', 'aa', '6d']
-
-# these correspond to [root, left knee, right knee, left heel, right heel, left toe, right toe, left hand, right hand]
-CONTACT_ORDERING = ['hips', 'leftLeg', 'rightLeg', 'leftFoot', 'rightFoot', 'leftToeBase', 'rightToeBase', 'leftHand', 'rightHand']
-CONTACT_INDS = [SMPL_JOINTS[jname] for jname in CONTACT_ORDERING]
-
-NUM_BODY_JOINTS = len(SMPL_JOINTS)-1
-NUM_MOJO_VERTS = 43
-
-DATA_NAMES = ['trans', 'trans_vel', 'root_orient', 'root_orient_vel', 'pose_body', 'pose_body_vel', 'joints', 'joints_vel', 'joints_orient_vel', 'verts', 'verts_vel', 'contacts']
-
-SMPL_JOINTS_RETURN_CONFIG = {
-    'use_smpl_frame' : True,
-    'trans' : True,
-    'trans_vel' : True,
-    'root_orient' : True,
-    'root_orient_vel' : True,
-    'pose_body' : True,
-    'pose_body_vel' : False,
-    'joints' : True,
-    'joints_vel' : True,
-    'joints_orient_vel' : False,
-    'verts' : False,
-    'verts_vel' : False,
-    'contacts' : False
-}
-
-SMPL_JOINTS_CONTACTS_RETURN_CONFIG = {
-    'use_smpl_frame' : True,
-    'trans' : True,
-    'trans_vel' : True,
-    'root_orient' : True,
-    'root_orient_vel' : True,
-    'pose_body' : True,
-    'pose_body_vel' : False,
-    'joints' : True,
-    'joints_vel' : True,
-    'joints_orient_vel' : False,
-    'verts' : False,
-    'verts_vel' : False,
-    'contacts' : True
-}
-
-ALL_RETURN_CONFIG = {
-    'use_smpl_frame' : True,
-    'trans' : True,
-    'trans_vel' : True,
-    'root_orient' : True,
-    'root_orient_vel' : True,
-    'pose_body' : True,
-    'pose_body_vel' : False,
-    'joints' : True,
-    'joints_vel' : True,
-    'joints_orient_vel' : False,
-    'verts' : True,
-    'verts_vel' : False,
-    'contacts' : True
-}
-
-JOINTS_VERTS_RETURN_CONFIG = {
-    'use_smpl_frame' : False, # use joint frame
-    'trans' : False,
-    'trans_vel' : False,
-    'root_orient' : False,
-    'root_orient_vel' : False,
-    'pose_body' : False,
-    'pose_body_vel' : False,
-    'joints' : True,
-    'joints_vel' : True,
-    'joints_orient_vel' : True,
-    'verts' : True,
-    'verts_vel' : True,
-    'contacts' : False
-}
-
-RETURN_CONFIGS = {
-                  'joints+verts' : JOINTS_VERTS_RETURN_CONFIG,
-                  'smpl+joints+contacts' : SMPL_JOINTS_CONTACTS_RETURN_CONFIG,
-                  'smpl+joints' : SMPL_JOINTS_RETURN_CONFIG,
-                  'all' : ALL_RETURN_CONFIG
-                  }
-
-def data_name_list(return_config):
-    '''
-    returns the list of data values in the given configuration
-    '''
-    cur_ret_cfg = RETURN_CONFIGS[return_config]
-    data_names = [k for k in DATA_NAMES if cur_ret_cfg[k]]
-    return data_names
-
-def data_dim(dname, rot_rep_size=9):
-    '''
-    returns the dimension of the data with the given name. If the data is a rotation, returns the size with the given representation.
-    '''
-    if dname in ['trans', 'trans_vel', 'root_orient_vel']:
-        return 3
-    elif dname in ['root_orient']:
-        return rot_rep_size
-    elif dname in ['pose_body']:
-        return NUM_BODY_JOINTS*rot_rep_size
-    elif dname in ['pose_body_vel']:
-        return NUM_BODY_JOINTS*3
-    elif dname in ['joints', 'joints_vel']:
-        return len(SMPL_JOINTS)*3
-    elif dname in ['joints_orient_vel']:
-        return 1
-    elif dname in ['verts', 'verts_vel']:
-        return NUM_MOJO_VERTS*3
-    elif dname in ['contacts']:
-        return len(CONTACT_ORDERING)
-    else:
-        print('The given data name %s is not valid!' % (dname))
-        exit()
+from utils.transforms import batch_rodrigues, rot6d_to_rotmat, compute_world2aligned_joints_mat, matrot2axisangle
 
 class AmassDiscreteDataset(Dataset):
     '''
@@ -159,12 +34,11 @@ class AmassDiscreteDataset(Dataset):
                        step_frames_out=1,
                        frames_out_step_size=1,
                        data_rot_rep='aa',
-                       data_return_config='smpl+joints',
+                       data_return_config='smpl+joints+contacts',
                        return_global=False,
                        only_global=False,
                        data_noise_std=0.0,
                        deterministic_train=False,
-                       data_reverse=False,
                        custom_split=None
                  ):
         '''
@@ -177,14 +51,11 @@ class AmassDiscreteDataset(Dataset):
         - step_frames_out : the number of out frames (future predicted frames) to return for each step of the sampled sequence. sampled at a rate of frames_out_step_size. No zero-padding is done for the end, only sequences with the available future frames are returned.
         - frames_out_step_size : in addition to immediate future step, how many steps between returned future frames. e.g. step_frames_out=3 and frames_out_step_size=4 will return the the 1st, 5th, and 9th future frames.
         - splits_path : directory to split files if want to use fixed splits
-        - data_rot_rep : the rotation representation for the INPUT data. ['aa', '6d'] Output data is always given as a rotation matrix.
-        - return_verts : if true, returns the MOJO vertex postiions
-        - return_vel : if true, returns the joint position velocities (and vertex position velocities if applicable)
+        - data_rot_rep : the rotation representation for the INPUT data. Output data is always given as a rotation matrix.
         - return_global : if true, returns the global motion trajectory (trans, orient, joints, joints_vel) in addition to the relative per-step data for each sequence.
         - only_global : if true, only returns the global sequence and not per step in/out
         - data_noise_std : standard deviation for gaussian noise to add to INPUT data
         - deterministic_train : if True, does not randomly choose sequences for training split
-        - data_reverse : returns sequences backward in time, i.e. input is t+1 and output is t
         - custom_split : a list of datasets to use as the split if split_by is 'custom'
         '''
         super(AmassDiscreteDataset, self).__init__()
@@ -228,14 +99,7 @@ class AmassDiscreteDataset(Dataset):
         self.noise_std = data_noise_std
         self.return_cfg = RETURN_CONFIGS[data_return_config]
         self.deterministic_train = deterministic_train
-        self.reverse = data_reverse
         self.custom_split = custom_split
-
-        if self.reverse and (self.step_frames_in != 1 or self.step_frames_out != 1):
-            Logger.log('Only single in/out steps are supported in the reverse direction!')
-            exit()
-        if self.reverse:
-            Logger.log('Reversing data sequences to be return backwards in time...')
 
         # based on the number of input and output frames (need self.sample_num_frames inputs and outputs)
         self.effective_seq_len = self.sample_num_frames + 1 + (self.step_frames_out-1)*self.frames_out_step_size  # number of frames we need to subsample to build a data sequence
@@ -391,11 +255,6 @@ class AmassDiscreteDataset(Dataset):
                 sequence_paths += split_seq_files.tolist()
                 sequence_info += split_seq_info.tolist()
 
-        # print(sequence_paths)
-        # print(sequence_info)
-
-        # print(len(sequence_paths))
-        # print(len(sequence_info))
 
         # chop into subsequences and build dict (need for using deterministic subsequences rather than random sampling the start)
         #   and determining "length" of the dataset
@@ -436,8 +295,7 @@ class AmassDiscreteDataset(Dataset):
         sample_nframes = self.effective_seq_len # need num_frames with an input (past) and output (future) and future may be at large step size
         if self.split == 'train' and not self.deterministic_train:
             # randomly choose sequence weighted by duration (if not split by subject or dataset)
-            seq_prob = None
-            seq_idx = np.random.choice(self.num_seq, size=1, replace=False, p=seq_prob)[0]
+            seq_idx = np.random.choice(self.num_seq, size=1, replace=False, p=None)[0]
             seq_file_path = self.sequence_paths[seq_idx]
             # randomly choose a subsequence window and randomly subsample frames from this
             _, seq_nframes, _ = self.sequence_info[seq_idx]
@@ -451,10 +309,6 @@ class AmassDiscreteDataset(Dataset):
             seq_file_path = self.sequence_paths[seq_idx]
             sample_frame_inds = np.arange(start_frame_idx, end_frame_idx)
 
-        # print(seq_file_path)
-        # print(sample_frame_inds)
-        # print(len(sample_frame_inds))
-
         # read in npz file (only read in what we need based on flags)
         data = np.load(seq_file_path)
         fps = data['fps']
@@ -462,8 +316,7 @@ class AmassDiscreteDataset(Dataset):
 
         # smpl
         world2aligned_rot = data['world2aligned_rot'][sample_frame_inds]
-        betas = np.zeros((self.sample_num_frames, 16))
-        #betas = np.repeat(data['betas'][np.newaxis], self.sample_num_frames, axis=0)
+        betas = np.repeat(data['betas'][np.newaxis], self.sample_num_frames, axis=0)
         trans = data['trans'][sample_frame_inds]
         root_orient = data['root_orient'][sample_frame_inds]
         pose_body = data['pose_body'][sample_frame_inds]
@@ -473,7 +326,6 @@ class AmassDiscreteDataset(Dataset):
         pose_body_vel = data['pose_body_vel'][sample_frame_inds]
 
         # Joints
-        joints_world2aligned_rot = data['joints_world2aligned_rot'][sample_frame_inds]
         joints = data['joints'][sample_frame_inds]
         verts = data['mojo_verts'][sample_frame_inds]
         num_verts = verts.shape[1]
@@ -485,11 +337,7 @@ class AmassDiscreteDataset(Dataset):
         contacts = data['contacts'][sample_frame_inds]
         contacts = contacts[:, CONTACT_INDS] # only need certain joints
 
-        # NOTE: other possible data that we don't use currently
-        # pose_hand = data['pose_hand'][sample_frame_inds]
-        # floor_height = data['floor_height']
-
-                # build return dicts and convert to torch tensors
+        # build return dicts and convert to torch tensors
         meta = {'fps' : fps,
                 'path' : '/'.join(seq_file_path.split('/')[-3:]),
                 'gender' : gender,
@@ -500,32 +348,14 @@ class AmassDiscreteDataset(Dataset):
         root_orient_mat = batch_rodrigues(torch.Tensor(root_orient).reshape(-1, 3)).numpy() # T x 3 x 3
 
         # GLOBAL data is only output of immediate next step
-        # global_root_orient = global_root_orient_vel = global_trans = global_trans_vel = global_joints = global_joints_vel = global_verts = global_verts_vel = None
         global_data_dict = dict()
         if self.return_global:
             # collect all outputs transformed to the frame of the initial input
             global_world2aligned_trans = np.zeros((1, 3))
             trans2joint = np.zeros((1, 1, 3))
-            if self.return_cfg['use_smpl_frame']:
-                if self.reverse:
-                    global_world2aligned_rot = world2aligned_rot[-1]
-                    global_world2aligned_trans[0, :2] = -trans[-1, :2]
-                    trans2joint[0, 0, :2] = -(joints[-1:, 0, :] + global_world2aligned_trans)[0, :2]
-                else:
-                    global_world2aligned_rot = world2aligned_rot[0]
-                    global_world2aligned_trans[0, :2] = -trans[0, :2]
-                    trans2joint[0, 0, :2] = -(joints[0:1, 0, :] + global_world2aligned_trans)[0, :2]
-            else:
-                if self.reverse:
-                    global_world2aligned_rot = joints_world2aligned_rot[-1]
-                    global_world2aligned_trans[0, :2] = -joints[-1, 0, :2]
-                else:
-                    global_world2aligned_rot = joints_world2aligned_rot[0]
-                    global_world2aligned_trans[0, :2] = -joints[0, 0, :2]
-
-            # print(global_world2aligned_rot.shape)
-            # print(global_world2aligned_trans)
-            # print(trans2joint)
+            global_world2aligned_rot = world2aligned_rot[0]
+            global_world2aligned_trans[0, :2] = -trans[0, :2]
+            trans2joint[0, 0, :2] = -(joints[0:1, 0, :] + global_world2aligned_trans)[0, :2]
 
             sidx_glob = 0 if self.only_global else 1 # return full vs only outputs
             glob_num_frames = (self.sample_num_frames + 1) if self.only_global else self.sample_num_frames
@@ -590,8 +420,6 @@ class AmassDiscreteDataset(Dataset):
                 # only return global data
                 data_out = dict()
                 for k, v in global_data_dict.items():
-                    if self.reverse:
-                        v = v[::-1].copy()
                     data_out[k] = torch.Tensor(v)
                 # add one to beta
                 meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
@@ -600,28 +428,11 @@ class AmassDiscreteDataset(Dataset):
         # set up transformation to canonical frame for all input sequences
         world2aligned_trans = np.zeros((self.sample_num_frames, 3))
         trans2joint = np.zeros((1, 1, 3))
-        if self.return_cfg['use_smpl_frame']:
-            if self.reverse:
-                # align using smpl translation and root orientation
-                world2aligned_rot = world2aligned_rot[1:].copy()
-                world2aligned_trans[:, :2] = -trans[1:, :2].copy()
-                # offset between the translation origin and the root joint (depends on body shape beta)
-                trans2joint[0, 0, :2] = -(joints[-1, 0, :] + world2aligned_trans[-1])[:2]
-            else:
-                # align using smpl translation and root orientation
-                world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
-                world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
-                # offset between the translation origin and the root joint (depends on body shape beta)
-                trans2joint[0, 0, :2] = -(joints[0, 0, :] + world2aligned_trans[0])[:2]
-        else:
-            if self.reverse:
-                # align based on joint hip position and orientation
-                world2aligned_rot = joints_world2aligned_rot[1:].copy()
-                world2aligned_trans[:, :2] = -joints[1:, 0, :2].copy()
-            else:
-                # align based on joint hip position and orientation
-                world2aligned_rot = joints_world2aligned_rot[0:self.sample_num_frames].copy()
-                world2aligned_trans[:, :2] = -joints[0:self.sample_num_frames, 0, :2].copy()
+        # align using smpl translation and root orientation
+        world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
+        world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
+        # offset between the translation origin and the root joint (depends on body shape beta)
+        trans2joint[0, 0, :2] = -(joints[0, 0, :] + world2aligned_trans[0])[:2]
 
         # print(world2aligned_trans.shape)
         # print(world2aligned_rot.shape)
@@ -709,12 +520,10 @@ class AmassDiscreteDataset(Dataset):
         # smpl root translation
         trans_in = trans_out = None
         if self.return_cfg['trans']:
-            # xy_trans_offsets = np.zeros((self.sample_num_frames, 3)) # will need for joints and vertices too
             trans_data = np.zeros((self.sample_num_frames, slice_size, 3))
             for t in range(self.sample_num_frames):
                 cur_trans_data = trans[t:t+slice_size].copy()
                 # transform to frame of the last input step
-                # xy_trans_offsets[t, :2] = cur_trans_data[self.step_frames_in-1, :2].copy()
                 cur_trans_data = cur_trans_data + world2aligned_trans[t:t+1]
                 cur_align_rot = world2aligned_rot[t]
                 aligned_cur_trans_data = np.matmul(cur_align_rot, cur_trans_data.T).T
@@ -744,24 +553,19 @@ class AmassDiscreteDataset(Dataset):
         # joint positions
         joints_in = joints_out = None
         if self.return_cfg['joints']:
-            # xy_joint_offsets = np.zeros((self.sample_num_frames, 3)) # will need for vertices TODO: this should really be the same for all steps since same beta
             joints_data = np.zeros((self.sample_num_frames, slice_size, len(SMPL_JOINTS), 3))
             for t in range(self.sample_num_frames):
                 cur_joints_data = joints[t:t+slice_size].copy()
                 # transform to frame of the last input step
-                # cur_joints_data -= xy_trans_offsets[t:t+1]
-                # xy_joint_offsets[t, :2] = cur_joints_data[self.step_frames_in-1, 0, :2].copy()
-                cur_joints_data = cur_joints_data + world2aligned_trans[t].reshape((1,1,3)) + trans2joint #xy_joint_offsets[t].reshape((1,1,3))
+                cur_joints_data = cur_joints_data + world2aligned_trans[t].reshape((1,1,3)) + trans2joint
                 cur_align_rot = world2aligned_rot[t] 
                 aligned_cur_joints_data = np.matmul(cur_align_rot, cur_joints_data.reshape((-1, 3)).T).T.reshape((slice_size, len(SMPL_JOINTS), 3))
                 # back to align with global translation. Note, we do not need to rotate the offset because the global rotation is actually done about the root joint
-                aligned_cur_joints_data = aligned_cur_joints_data - trans2joint #xy_joint_offsets[t].reshape((1,1,3))
+                aligned_cur_joints_data = aligned_cur_joints_data - trans2joint
                 if self.step_frames_in > 1 and t < (self.step_frames_in - 1):
                     # reset padding to zero
                     aligned_cur_joints_data[:(self.step_frames_in - 1 - t)] = 0.0
                 joints_data[t] = aligned_cur_joints_data
-
-            # print(xy_joint_offsets)
 
             joints_in = joints_data[:,:self.step_frames_in]
             joints_out = joints_data[:,self.step_frames_in::self.frames_out_step_size]
@@ -785,13 +589,11 @@ class AmassDiscreteDataset(Dataset):
             for t in range(self.sample_num_frames):
                 cur_verts_data = verts[t:t+slice_size].copy()
                 # transform to frame of the last input step
-                # cur_verts_data -= xy_trans_offsets[t:t+1]
-                # cur_verts_data -= xy_joint_offsets[t].reshape((1,1,3))
                 cur_verts_data = cur_verts_data + world2aligned_trans[t].reshape((1,1,3)) + trans2joint
                 cur_align_rot = world2aligned_rot[t] 
                 aligned_cur_verts_data = np.matmul(cur_align_rot, cur_verts_data.reshape((-1, 3)).T).T.reshape((slice_size, num_verts, 3))
                 # back to align with global translation. Note, we do not need to rotate the offset because the global rotation is actually done about the root joint
-                aligned_cur_verts_data = aligned_cur_verts_data - trans2joint #xy_joint_offsets[t].reshape((1,1,3))
+                aligned_cur_verts_data = aligned_cur_verts_data - trans2joint
                 if self.step_frames_in > 1 and t < (self.step_frames_in - 1):
                     # reset padding to zero
                     aligned_cur_verts_data[:(self.step_frames_in - 1 - t)] = 0.0
@@ -849,10 +651,6 @@ class AmassDiscreteDataset(Dataset):
                 # add noise to inputs
                 cur_in = v[0]
                 cur_out = v[1]
-                if self.reverse:
-                    temp = cur_out
-                    cur_out = cur_in[::-1].copy()
-                    cur_in = temp[::-1].copy()
 
                 if self.noise_std > 0.0 and self.split == 'train':
                     cur_in += np.random.normal(loc=0.0, scale=self.noise_std, size=cur_in.shape)
@@ -862,15 +660,13 @@ class AmassDiscreteDataset(Dataset):
 
         if self.return_global:
             for k, v in global_data_dict.items():
-                if self.reverse:
-                    v = v[::-1].copy()
                 data_out[k] = torch.Tensor(v)
 
         return data_in, data_out, meta
 
 if __name__=='__main__':
     # dataset
-    data_paths = ['./data/dev_amass_walking/CMU']
+    data_paths = ['./data/amass_30_fps_no_terrain_contacts']
     data_rot_rep = 'mat'
     data_return_config = 'smpl+joints+contacts'
     return_config_dict = RETURN_CONFIGS[data_return_config]
@@ -885,19 +681,17 @@ if __name__=='__main__':
                                     step_frames_in=steps_in,
                                     step_frames_out=steps_out,
                                     frames_out_step_size=frames_out_step_size,
-                                    # split_by='dataset',
-                                    split_by='subject',
+                                    split_by='dataset',
                                     train_frac=0.8, val_frac=0.1,
                                     sample_num_frames=sample_num_frames,
                                     data_rot_rep=data_rot_rep,
                                     data_return_config=data_return_config,
                                     return_global=True,
                                     data_noise_std=noise_std,
-                                    data_reverse=False
                                     )
 
     # create loaders
-    batch_size = 4
+    batch_size = 1
     loader = DataLoader(dataset, 
                         batch_size=batch_size,
                         shuffle=True,
@@ -911,21 +705,14 @@ if __name__=='__main__':
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = torch.device("cpu")
-    # male_bm_path = os.path.join('./body_models/smplh', 'male/model.npz')
-    male_bm_path = os.path.join('./body_models/smplx', 'SMPLX_MALE.npz')
+    male_bm_path = os.path.join('./body_models/smplh', 'male/model.npz')
     male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=slice_size).to(device)
     male_bm_world = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=sample_num_frames+1).to(device)
     male_bm_global = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=sample_num_frames, use_vtx_selector=False).to(device)
-    # female_bm_path = os.path.join('./body_models/smplh', 'female/model.npz')
-    female_bm_path = os.path.join('./body_models/smplx', 'SMPLX_FEMALE.npz')
+    female_bm_path = os.path.join('./body_models/smplh', 'female/model.npz')
     female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=slice_size).to(device)
     female_bm_world = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=sample_num_frames+1).to(device)
     female_bm_global = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=sample_num_frames, use_vtx_selector=False).to(device)
-    # neutral_bm_path = os.path.join('./body_models/smplh', 'neutral/model.npz')
-    neutral_bm_path = os.path.join('./body_models/smplx', 'SMPLX_NEUTRAL.npz')
-    neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=slice_size).to(device)
-    neutral_bm_world = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=sample_num_frames+1).to(device)
-    neutral_bm_global = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=sample_num_frames, use_vtx_selector=False).to(device)
 
     for i, data in enumerate(loader):
         data_in, data_out, meta = data
@@ -997,41 +784,39 @@ if __name__=='__main__':
             contacts = torch.cat([contacts_in, contacts_out], axis=2).to(device)
             print(contacts.size())
         
-        bm = neutral_bm
-        if meta['gender'][0] != 'neutral':
-            bm = male_bm if meta['gender'][0] == 'male' else female_bm
+        bm = male_bm if meta['gender'][0] == 'male' else female_bm
         # NOTE: show each in/out slice individually
-        # for t in range(0, sample_num_frames):
-        #     print('t: %d' % (t))
-        #     render_body = True
-        #     render_joints = True
-        #     joints_seq = joints_vel_seq = None
-        #     if data_return_config == 'smpl+joints+contacts':
-        #         body = bm(pose_body=pose_body[0, t], pose_hand=None, betas=betas[0, :slice_size], root_orient=root_orient[0, t], trans=trans[0, t])
-        #         joints_seq = joints[0, t]
-        #         joints_vel_seq = trans_vel[0, t].reshape((-1, 1, 3)).repeat((1, 22, 1))
-        #     else:
-        #         body = bm(betas=betas[0, :slice_size])
-        #         render_body = False
-        #         joints_seq = joints[0, t]
+        for t in range(0, sample_num_frames):
+            # print('t: %d' % (t))
+            render_body = True
+            render_joints = True
+            joints_seq = joints_vel_seq = None
+            if data_return_config == 'smpl+joints+contacts':
+                body = bm(pose_body=pose_body[0, t], pose_hand=None, betas=betas[0, :slice_size], root_orient=root_orient[0, t], trans=trans[0, t])
+                joints_seq = joints[0, t]
+                joints_vel_seq = trans_vel[0, t].reshape((-1, 1, 3)).repeat((1, 22, 1))
+            else:
+                body = bm(betas=betas[0, :slice_size])
+                render_body = False
+                joints_seq = joints[0, t]
 
-        #         joints_vel_seq = torch.zeros((slice_size, 3)).to(device)
-        #         joints_vel_seq[:, 2] = joints_orient_vel[0, t, :, 0]
-        #         joints_vel_seq = joints_vel_seq.reshape((-1, 1, 3)).repeat((1, 22, 1))
+                joints_vel_seq = torch.zeros((slice_size, 3)).to(device)
+                joints_vel_seq[:, 2] = joints_orient_vel[0, t, :, 0]
+                joints_vel_seq = joints_vel_seq.reshape((-1, 1, 3)).repeat((1, 22, 1))
 
-        #     contacts_seq = None
-        #     if return_config_dict['contacts']:
-        #         contacts_seq = torch.zeros((slice_size, len(SMPL_JOINTS))).to(device)
-        #         contacts_seq[:,CONTACT_INDS] = contacts[0, t]
+            contacts_seq = None
+            if return_config_dict['contacts']:
+                contacts_seq = torch.zeros((slice_size, len(SMPL_JOINTS))).to(device)
+                contacts_seq[:,CONTACT_INDS] = contacts[0, t]
 
             
-        #     viz_smpl_seq(body, imw=1080, imh=1080, fps=steps_in+steps_out, contacts=contacts_seq,
-        #         render_body=render_body, render_joints=render_joints, render_skeleton=(data_return_config=='joints' or data_return_config=='joints+verts'), render_ground=True,
-        #         joints_seq=joints_seq) #,
-        #         # joints_vel=joints_vel_seq)
-        #         # points_seq=verts[0, t])
-        #         # points_vel=verts_vel[0, t]) #, vtx_list=MOJO_VERTS)
-        #         # joints_seq=None)
+            # viz_smpl_seq(body, imw=1080, imh=1080, fps=steps_in+steps_out, contacts=contacts_seq,
+            #     render_body=render_body, render_joints=render_joints, render_skeleton=(data_return_config=='joints' or data_return_config=='joints+verts'), render_ground=True,
+            #     joints_seq=joints_seq) #,
+                # joints_vel=joints_vel_seq)
+                # points_seq=verts[0, t])
+                # points_vel=verts_vel[0, t]) #, vtx_list=MOJO_VERTS)
+                # joints_seq=None)
 
         
         #
@@ -1058,9 +843,7 @@ if __name__=='__main__':
             viz_contacts[:,:,CONTACT_INDS] = contacts
             print(viz_contacts.size())
         
-        bm_global = neutral_bm_global
-        if meta['gender'][0] != 'neutral':
-            bm_global = male_bm_global if meta['gender'][0] == 'male' else female_bm_global
+        bm_global = male_bm_global if meta['gender'][0] == 'male' else female_bm_global
         body = bm_global(pose_body=pose_body[0], pose_hand=None, betas=betas[0,0].reshape((1, -1)).expand((sample_num_frames, 16)), root_orient=root_orient[0], trans=trans[0])
         viz_smpl_seq(body, imw=1080, imh=1080, fps=30,
             render_body=True, render_joints=True, render_skeleton=False, render_ground=True,

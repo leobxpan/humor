@@ -9,7 +9,8 @@ SMPL_JOINTS = {'hips' : 0, 'leftUpLeg' : 1, 'rightUpLeg' : 2, 'spine' : 3, 'left
 SMPL_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 12, 12, 13, 14, 16, 17, 18, 19]
 
 SMPLH_PATH = './body_models/smplh'
-SMPLX_PATH = './body_models/smplx'
+#SMPLX_PATH = './body_models/smplx'
+SMPLX_PATH = './humor/smplx_models'
 SMPL_PATH = './body_models/smpl'
 VPOSER_PATH = './body_models/vposer_v1_0'
 
@@ -18,11 +19,62 @@ KEYPT_VERTS = [4404, 920, 3076, 3169, 823, 4310, 1010, 1085, 4495, 4569, 6615, 3
             6785, 3383, 6607, 3207, 1241, 1508, 4797, 4122, 1618, 1569, 5135, 5040, 5691, 5636,
             5404, 2230, 2173, 2108, 134, 3645, 6543, 3123, 3024, 4194, 1306, 182, 3694, 4294, 744]
 
+MOJO_VERTS = [4404, 920, 3076, 3169, 823, 4310, 1010, 1085, 4495, 4569, 6615, 3217, 3313, 6713,
+              6785, 3383, 6607, 3207, 1241, 1508, 4797, 4122, 1618, 1569, 5135, 5040, 5691, 5636,
+              5404, 2230, 2173, 2108, 134, 3645, 6543, 3123, 3024, 4194, 1306, 182, 3694, 4294, 744]
 
 #
 # From https://github.com/vchoutas/smplify-x/blob/master/smplifyx/utils.py
 # Please see license for usage restrictions.
 #
+
+def to_tensor(array, dtype=torch.float32):
+    if 'torch.tensor' not in str(type(array)):
+        return torch.tensor(array, dtype=dtype)
+
+def rot_mat_to_euler(rot_mats):
+    # Calculates rotation matrix to euler angles
+    # Careful for extreme cases of eular angles like [0.0, pi, 0.0]
+
+    sy = torch.sqrt(rot_mats[:, 0, 0] * rot_mats[:, 0, 0] +
+                    rot_mats[:, 1, 0] * rot_mats[:, 1, 0])
+    return torch.atan2(-rot_mats[:, 2, 0], sy)
+
+def axisangle2matrots(axisangle):
+    '''
+    :param axisangle: N*num_joints*3
+    :return: N*num_joints*9
+    '''
+    import cv2
+    batch_size = axisangle.shape[0]
+    axisangle = axisangle.reshape([batch_size,-1,3])
+    out_matrot = []
+    for mIdx in range(axisangle.shape[0]):
+        cur_axisangle = []
+        for jIdx in range(axisangle.shape[1]):
+            a = cv2.Rodrigues(axisangle[mIdx, jIdx:jIdx + 1, :].reshape(1, 3))[0]
+            cur_axisangle.append(a)
+
+        out_matrot.append(np.array(cur_axisangle).reshape([1,-1,9]))
+    return np.vstack(out_matrot)
+
+def matrot2axisangle(matrots):
+    '''
+    :param matrots: N*num_joints*9
+    :return: N*num_joints*3
+    '''
+    import cv2
+    batch_size = matrots.shape[0]
+    matrots = matrots.reshape([batch_size,-1,9])
+    out_axisangle = []
+    for mIdx in range(matrots.shape[0]):
+        cur_axisangle = []
+        for jIdx in range(matrots.shape[1]):
+            a = cv2.Rodrigues(matrots[mIdx, jIdx:jIdx + 1, :].reshape(3, 3))[0].reshape((1, 3))
+            cur_axisangle.append(a)
+
+        out_axisangle.append(np.array(cur_axisangle).reshape([1,-1,3]))
+
 def smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True,
                      use_face_contour=False, openpose_format='coco25'):
     ''' Returns the indices of the permutation that maps SMPL to OpenPose
