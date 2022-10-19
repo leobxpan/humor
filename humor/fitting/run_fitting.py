@@ -11,6 +11,7 @@ cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
 import importlib, time, math, shutil, json
+import traceback
 
 import numpy as np
 
@@ -120,8 +121,10 @@ def main(args, config_file):
             mask_out_path = os.path.join(video_preprocess_path, 'masks')
         op_out_path = os.path.join(video_preprocess_path, 'op_keypoints')
 
-        # if we already did precprocessing (ran sam video before), skip it
-        if not os.path.exists(video_preprocess_path):
+        use_custom_keypts = args.op_keypts is not None
+
+        # if we already did preprocessing (ran same video before), skip it
+        if not os.path.exists(video_preprocess_path) or (not use_custom_keypts and not os.path.exists(op_out_path)):
             mkdir(video_preprocess_path)
             # video -> images (at 30 Hz) - save to new output directory
             img_folder, _, img_shape = video_to_images(args.data_path,
@@ -130,12 +133,14 @@ def main(args, config_file):
                                                             return_info=True)
             print(img_folder)
             print(img_shape)
-            # OpenPose on images
-            op_frames_out = os.path.join(video_preprocess_path, 'op_frames')
-            run_openpose(args.openpose, img_folder,
-                        op_out_path,
-                        img_out=op_frames_out,
-                        video_out=os.path.join(video_preprocess_path, 'op_keypoints_overlay.mp4'))
+
+            if not use_custom_keypts:
+                # OpenPose on images
+                op_frames_out = os.path.join(video_preprocess_path, 'op_frames')
+                run_openpose(args.openpose, img_folder,
+                            op_out_path,
+                            img_out=op_frames_out,
+                            video_out=os.path.join(video_preprocess_path, 'op_keypoints_overlay.mp4'))
 
             # if desired segmentation mask on images
             if args.mask_joints2d:
@@ -149,6 +154,11 @@ def main(args, config_file):
             if args.mask_joints2d and not os.path.exists(mask_out_path):
                 print('Could not find detected masks from previous pre-processing! Please delete rgb_preprocess directory and re-run!')
                 exit()
+
+        if use_custom_keypts:
+            assert os.path.exists(args.op_keypts), 'Could not find custom keypoints path %s!' % (args.op_keypts)
+            print('Using pre-detected OpenPose keypoints from %s...' % (args.op_keypts))
+            op_out_path = args.op_keypts
 
         # read in intrinsics if given
         cam_mat = None
@@ -250,6 +260,9 @@ def main(args, config_file):
             Logger.log('Could not find init motion state prior at given directory!')
             exit()
 
+    if args.data_type == 'RGB' and args.save_results:
+        all_res_out_paths = []
+
     fit_errs = dict()
     prev_batch_overlap_res_dict = None
     use_overlap_loss = sum(loss_weights['rgb_overlap_consist']) > 0.0
@@ -324,6 +337,8 @@ def main(args, config_file):
                 mkdir(cur_res_out_path)
                 cur_res_out_paths.append(cur_res_out_path)
         cur_res_out_paths = cur_res_out_paths if len(cur_res_out_paths) > 0 else None
+        if cur_res_out_paths is not None and args.data_type == 'RGB' and args.save_results:
+            all_res_out_paths += cur_res_out_paths
         cur_z_init_paths = cur_z_init_paths if len(cur_z_init_paths) > 0 else None
         cur_z_final_paths = cur_z_final_paths if len(cur_z_final_paths) > 0 else None
 
@@ -391,32 +406,37 @@ def main(args, config_file):
                                     im_dim=im_dim)
 
         # run optimizer
-        optim_result, per_stage_results = optimizer.run(observed_data,
-                                                        data_fps=data_fps,
-                                                        lr=args.lr,
-                                                        num_iter=args.num_iters,
-                                                        lbfgs_max_iter=args.lbfgs_max_iter,
-                                                        stages_res_out=cur_res_out_paths,
-                                                        fit_gender=fit_gender)
+        try:
+            optim_result, per_stage_results = optimizer.run(observed_data,
+                                                            data_fps=data_fps,
+                                                            lr=args.lr,
+                                                            num_iter=args.num_iters,
+                                                            lbfgs_max_iter=args.lbfgs_max_iter,
+                                                            stages_res_out=cur_res_out_paths,
+                                                            fit_gender=fit_gender)
 
-        # save final results
-        if cur_res_out_paths is not None:
-            save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
-                                optim_floor=optimizer.optim_floor,
-                                obs_img_paths=obs_img_paths,
-                                obs_mask_paths=obs_mask_paths)
+            # save final results
+            if cur_res_out_paths is not None:
+                save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
+                                    optim_floor=optimizer.optim_floor,
+                                    obs_img_paths=obs_img_paths,
+                                    obs_mask_paths=obs_mask_paths)
 
-        elapsed_t = time.time() - start_t
-        Logger.log('Optimized sequence %d in %f s' % (i, elapsed_t))
+            elapsed_t = time.time() - start_t
+            Logger.log('Optimized sequence %d in %f s' % (i, elapsed_t))
 
-        # cache last verts, floor, and betas from last batch index to use in consistency loss
-        #   for next batch
-        if use_overlap_loss:
-            prev_batch_overlap_res_dict = dict()
-            prev_batch_overlap_res_dict['verts3d'] = per_stage_results['stage3']['verts3d'][-1].clone().detach()
-            prev_batch_overlap_res_dict['betas'] = optim_result['betas'][-1].clone().detach()
-            prev_batch_overlap_res_dict['floor_plane'] = optim_result['floor_plane'][-1].clone().detach()
-            prev_batch_overlap_res_dict['seq_interval'] = observed_data['seq_interval'][-1].clone().detach()
+            # cache last verts, floor, and betas from last batch index to use in consistency loss
+            #   for next batch
+            if use_overlap_loss:
+                prev_batch_overlap_res_dict = dict()
+                prev_batch_overlap_res_dict['verts3d'] = per_stage_results['stage3']['verts3d'][-1].clone().detach()
+                prev_batch_overlap_res_dict['betas'] = optim_result['betas'][-1].clone().detach()
+                prev_batch_overlap_res_dict['floor_plane'] = optim_result['floor_plane'][-1].clone().detach()
+                prev_batch_overlap_res_dict['seq_interval'] = observed_data['seq_interval'][-1].clone().detach()
+
+        except Exception as e:
+            Logger.log('Caught error in current optimization! Skipping...')
+            Logger.log(traceback.format_exc())
 
         if i < (len(data_loader) - 1):
             del optimizer
@@ -429,7 +449,7 @@ def main(args, config_file):
     if args.data_type == 'RGB' and args.save_results:
         Logger.log('Saving final results...')
         seq_intervals = dataset.seq_intervals
-        save_rgb_stitched_result(seq_intervals, cur_res_out_paths, res_out_path, device,
+        save_rgb_stitched_result(seq_intervals, all_res_out_paths, res_out_path, device,
                                  body_model_path, num_betas, use_joints2d)
 
 

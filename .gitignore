@@ -4,6 +4,11 @@ body_models
 data
 checkpoints
 out
+<<<<<<< HEAD
+
+humor/smplx_models
+humor/libmesh
+humor/vposer_v1_0
 *.zip
 *.obj
 
