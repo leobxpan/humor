@@ -137,6 +137,39 @@ class TrainConfig(BaseConfig):
         self.parser.add_argument('--sched-samp-start', type=int, default=None, help='The epoch at which to start scheduled sampling after the supervised phase of training.')
         self.parser.add_argument('--sched-samp-end', type=int, default=None, help='The epoch at which to end scheduled sampling which moves on to the autoregressive phase of training.')
 
+class MotionvaeModelConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to models.ExampleModel model class.
+    '''
+    def __init__(self, argv):
+        super(MotionvaeModelConfig, self).__init__(argv)
+        # arguments specific to this model
+        self.parser.add_argument('--out-rot-rep', type=str, default='aa', choices=['aa', '6d', '9d'], help='Rotation representation to output from the model.')
+        self.parser.add_argument('--in-rot-rep', type=str, default='aa', choices=['aa', 'mat'], help='Rotation representation to input to the model for the relative full sequence input.')
+        self.parser.add_argument('--latent-size', type=int, default=48, help='Size of the latent feature.')
+
+        self.parser.add_argument('--model-steps-in', dest='steps_in', type=int, default=1, help='At each step of the sequence, the number of input frames.')
+        self.parser.add_argument('--model-steps-out', dest='steps_out', type=int, default=1, help='At each step of the sequence, the number of output frames.')
+        self.parser.add_argument('--model-out-step-size', dest='out_step_size', type=int, default=1, help='Step size between output frames.')
+
+        self.parser.add_argument('--no-conditional-prior', dest='conditional_prior', action='store_false', help="Conditions the prior on the past input sequence.")
+        self.parser.set_defaults(conditional_prior=True)
+        self.parser.add_argument('--no-output-delta', dest='output_delta', action='store_false', help="Each step predicts the residual rather than the next step.")
+        self.parser.set_defaults(output_delta=True)
+
+        self.parser.add_argument('--posterior-arch', type=str, default='mlp', choices=['mlp'], help='')
+        self.parser.add_argument('--decoder-arch', type=str, default='mlp', choices=['mlp'], help='')
+        self.parser.add_argument('--prior-arch', type=str, default='mlp', choices=['mlp'], help='')
+
+        self.parser.add_argument('--model-data-config', type=str, default='smpl+joints+contacts', choices=['joints+verts', 'smpl+joints', 'smpl+joints+contacts', 'smpl+verts', 'smpl', 'joints', 'joints+pose'], help='which state configuration to use for the model')
+
+        self.parser.add_argument('--no-detach-sched-samp', dest='detach_sched_samp', action='store_false', help="Allows gradients to backprop through multiple output steps when using schedules sampling.")
+        self.parser.set_defaults(detach_sched_samp=True)
+
+        self.parser.add_argument('--model-use-smpl-joint-inputs', dest='model_use_smpl_joint_inputs', action='store_true', help="uses smpl joints rather than regressed joints to input at next step (during rollout and sched samp).")
+        self.parser.set_defaults(model_use_smpl_joint_inputs=False)
+        self.parser.add_argument('--model-smpl-batch-size', type=int, default=1, help='batch size')
+
 class TestConfig(BaseConfig):
     def __init__(self, argv):
         super(TestConfig, self).__init__(argv)
@@ -150,7 +183,7 @@ class TestConfig(BaseConfig):
 
         self.parser.add_argument('--eval-sampling', dest='eval_sampling', action='store_true', help="Visualizing random sample rollouts")
         self.parser.set_defaults(eval_sampling=False)
-        self.parser.add_argument('--eval-sampling-len', type=float, default=10.0, help='Number of seconds to sample for (default 10 s)')
+        self.parser.add_argument('--eval-sampling-len', dest='eval_sampling_len', type=float, default=10.0, help='Number of seconds to sample for (default 10 s)')
         self.parser.add_argument('--eval-sampling-debug', dest='eval_sampling_debug', action='store_true', help="Visualizes random samples in interactive visualization.")
         self.parser.set_defaults(eval_sampling_debug=False)
         self.parser.add_argument('--eval-test', dest='eval_full_test', action='store_true', help="Evaluate on the full test set with same metrics as during training.")
@@ -165,7 +198,14 @@ class TestConfig(BaseConfig):
         self.parser.set_defaults(viz_pred_joints=False)
         self.parser.add_argument('--viz-smpl-joints', dest='viz_smpl_joints', action='store_true', help="For visualization, SMPL joints are visualized (determined from HuMoR output joint angles).")
         self.parser.set_defaults(viz_smpl_joints=False)
-
+        self.parser.add_argument('--write-obj', dest='write_obj', action='store_true', help="Saves .obj files for body mesh locally.")
+        #self.parser.add_argument('--house-name', dest='house_name', type=str, required=True, help='House name that the current process handles.')
+        self.parser.add_argument('--seq-len', dest='seq_len', type=int, default=None, help="saves the last seq_len length of sequences. if None then save all.")
+        self.parser.add_argument('--num-batches', dest='num_batches', type=int, default=500, help="number of batches run for each (house_name, region_name) tuple (not the number that are actually saved)")
+        self.parser.add_argument('--debug', action='store_true')
+        # self.parser.add_argument('--worker_id', required=True, type=int)
+        # self.parser.add_argument('--num_workers', required=True, type=int)
+        # self.parser.add_argument('--dataset-type', dest='dataset_type', type=str, default="nomap_22", choices=["nomap_22", "map_10"])
 #
 # Edit/add configs here for changes to model-specific arguments.
 # NOTE: must be named ModelNameConfig to be properly loaded. Also should not clash names with any Base/Train/Test configuration flags.
@@ -256,3 +296,69 @@ class HumorLossConfig(BaseSubConfig):
         self.parser.add_argument('--smpl-mesh-loss', type=float, default=1.0, help='Loss weight')
         self.parser.add_argument('--smpl-joint-consistency-loss', type=float, default=1.0, help='Loss weight')
         self.parser.add_argument('--smpl-vert-consistency-loss', type=float, default=0.0, help='Loss weight')
+
+class MotionvaeLossConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to models.AmassDiscreteDataset dataset class.
+    '''
+    def __init__(self, argv):
+        super(MotionvaeLossConfig, self).__init__(argv)
+
+        self.parser.add_argument('--kl-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--kl-loss-anneal-start', type=int, default=0, help='The epoch that the kl loss will start linearly increasing from 0.0')
+        self.parser.add_argument('--kl-loss-anneal-end', type=int, default=0, help='The epoch that the kl loss will reach its full weight')
+        self.parser.add_argument('--kl-loss-cycle-len', type=int, default=-1, help='If > 0, KL annealing will be done cyclicly and it will last this many epochs per cycle. If given will ignore kl-loss-anneal-start/end.')
+
+        self.parser.add_argument('--regr-trans-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-trans-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--contacts-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--contacts-vel-loss', type=float, default=0.0, help='Loss weight')
+
+        self.parser.add_argument('--smpl-joint-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-mesh-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-joint-consistency-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-vert-consistency-loss', type=float, default=0.0, help='Loss weight')
+
+        self.parser.add_argument('--smpl-batch-size', type=int, default=160, help='the batch size to use for computing smpl losses. Must be >= batch_size*seq_len*num_out_steps')
+
+class MotionvaeLossConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to models.AmassDiscreteDataset dataset class.
+    '''
+    def __init__(self, argv):
+        super(MotionvaeLossConfig, self).__init__(argv)
+
+        self.parser.add_argument('--kl-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--kl-loss-anneal-start', type=int, default=0, help='The epoch that the kl loss will start linearly increasing from 0.0')
+        self.parser.add_argument('--kl-loss-anneal-end', type=int, default=0, help='The epoch that the kl loss will reach its full weight')
+        self.parser.add_argument('--kl-loss-cycle-len', type=int, default=-1, help='If > 0, KL annealing will be done cyclicly and it will last this many epochs per cycle. If given will ignore kl-loss-anneal-start/end.')
+
+        self.parser.add_argument('--regr-trans-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-trans-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--contacts-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--contacts-vel-loss', type=float, default=0.0, help='Loss weight')
+
+        self.parser.add_argument('--smpl-joint-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-mesh-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-joint-consistency-loss', type=float, default=0.0, help='Loss weight')
+        self.parser.add_argument('--smpl-vert-consistency-loss', type=float, default=0.0, help='Loss weight')
+
+        self.parser.add_argument('--smpl-batch-size', type=int, default=160, help='the batch size to use for computing smpl losses. Must be >= batch_size*seq_len*num_out_steps')
