@@ -2,6 +2,8 @@ import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
+#os.environ["DISPLAY"] = "localhost:1"
+
 import glob
 import os
 import argparse
@@ -640,7 +642,7 @@ def main(config):
                 os.mkdir(cur_subject_out)
 
         # then collect all sequence input files
-        input_seqs = glob.glob(os.path.join(data_dir, '*/*_poses.npz'))
+        input_seqs = glob.glob(os.path.join(data_dir, '*/poses.npz'))
         print(len(input_seqs))
 
         # and create output sequence file names
@@ -658,7 +660,7 @@ def main(config):
 
         all_seq_in_files += input_seqs
         all_seq_out_files += output_seqs
-    
+
     smplx_paths = [config.smplx_root]*len(all_seq_in_files)
     data_paths = list(zip(all_seq_in_files, all_seq_out_files, smplx_paths))
 

@@ -84,7 +84,8 @@ with torch.no_grad():
                 all_rhand_poses = []
    
                 count = 0
-                for i in range(0, len(all_pkls), 10):
+                #for i in range(0, len(all_pkls), 10):
+                for i in range(len(all_pkls)):
                     pkl = all_pkls[i]
                     pose_pkl = pickle.load(open(pkl, 'rb'))
 
@@ -114,18 +115,19 @@ with torch.no_grad():
                     smplx_output = body_mesh_model(return_verts=True, **pose)
 
                     pelvis = smplx_output.joints[0, 0].cpu().numpy()
-                    root_orient, trans = to_zup(root_orient, trans, pelvis)
+                    # root_orient, trans = to_zup(root_orient, trans, pelvis)
                     poses[:3] = root_orient
 
                     # debugging visualization
-                    # pose["global_orient"] = torch.tensor(root_orient).unsqueeze(0).to(torch.float32)
-                    # pose["transl"] = torch.tensor(trans).unsqueeze(0).to(torch.float32)
-                    # smplx_output = body_mesh_model(return_verts=True, **pose)
-                    # body_verts_batch = smplx_output.vertices
-                    # smplx_faces = body_mesh_model.faces
-                    # out_mesh = trimesh.Trimesh(body_verts_batch[0].cpu().numpy(), smplx_faces, process=False)
-                    # out_mesh.export(pkl.replace(".pkl", "_rot.obj"))
+                    pose["global_orient"] = torch.tensor(root_orient).unsqueeze(0).to(torch.float32)
+                    pose["transl"] = torch.tensor(trans).unsqueeze(0).to(torch.float32)
+                    smplx_output = body_mesh_model(return_verts=True, **pose)
+                    body_verts_batch = smplx_output.vertices
+                    smplx_faces = body_mesh_model.faces
+                    out_mesh = trimesh.Trimesh(body_verts_batch[0].cpu().numpy(), smplx_faces, process=False)
+                    out_mesh.export(pkl.replace(".pkl", "_orig.obj"))
 
+                    import pdb; pdb.set_trace()
                     all_poses.append(poses)
                     all_root_oris.append(root_orient)
                     all_root_trans.append(trans)
@@ -135,6 +137,9 @@ with torch.no_grad():
                     all_expressions.append(expressions)
                     all_lhand_poses.append(lhand)
                     all_rhand_poses.append(rhand)
+
+                    if i >= 50: break
+                import pdb; pdb.set_trace()
 
                 all_poses = np.stack(all_poses)
                 all_root_oris = np.stack(all_root_oris)

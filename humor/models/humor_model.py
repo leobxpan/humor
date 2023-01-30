@@ -314,6 +314,7 @@ class HumorModel(nn.Module):
                 return x_past
 
     def split_output(self, decoder_out, convert_rots=True):
+
         '''
         Given the output of the decoder, splits into each state component.
         Also transform rotation representation to matrices.
@@ -929,6 +930,8 @@ class HumorModel(nn.Module):
                     # reconstruct SMPL
                     cur_pred_trans, cur_pred_orient, cur_betas, cur_pred_pose = pad_list
                     bm = self.bm_dict[gender_name]
+
+                    cur_betas = torch.zeros(1, 16).to(cur_pred_pose)
                     pred_body = bm(pose_body=cur_pred_pose, betas=cur_betas, root_orient=cur_pred_orient, trans=cur_pred_trans)
                     if pad_size > 0:
                         pred_joints.append(pred_body.Jtr[:-pad_size])
@@ -962,6 +965,9 @@ class HumorModel(nn.Module):
             world2aligned_rot = compute_world2aligned_mat(root_orient_mat)
             world2aligned_trans = torch.cat([-x_pred_dict['trans'][:,0,:2], torch.zeros((B,1)).to(x_past)], axis=1)
 
+            root_orient_mat = x_pred_dict['root_orient'][:,0,:].reshape((B, 3, 3))
+            world2aligned_rot = compute_world2aligned_mat(root_orient_mat)
+            world2aligned_trans = torch.cat([-x_pred_dict['trans'][:,0,:2], torch.zeros((B,1)).to(x_past)], axis=1)
             #
             # transform inputs to this local frame (body pose is not affected) for next step
             #

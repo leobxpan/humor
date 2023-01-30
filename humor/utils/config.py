@@ -33,7 +33,7 @@ class BaseConfig():
         self.argv = argv
         self.parser = SplitLineParser(fromfile_prefix_chars='@', allow_abbrev=False)
 
-        self.parser.add_argument('--dataset', type=str, required=True, choices=['AmassDiscreteDataset'], help='The name of the dataset type.')
+        self.parser.add_argument('--dataset', type=str, required=True, choices=['AmassDiscreteDataset', 'GimoDiscreteDataset'], help='The name of the dataset type.')
         self.parser.add_argument('--model', type=str, required=True, help='The name of the model to use.')
         self.parser.add_argument('--loss', type=str, default=None, help='The name of the loss to use.')
         self.parser.add_argument('--out', type=str, default='./output', help='The directory to save outputs to (logs, results, weights, etc..).')
@@ -255,6 +255,25 @@ class AmassDiscreteDatasetConfig(BaseSubConfig):
         # arguments specific to this dataset
         self.parser.add_argument('--data-paths', type=str, nargs='+', required=True, help='Paths to dataset roots.')
         self.parser.add_argument('--split-by', type=str, default='dataset', choices=['single', 'sequence', 'subject', 'dataset'], help='How to split the dataset into train/test/val.')
+        self.parser.add_argument('--splits-path', type=str, default=None, help='Path to data splits to use.')
+        self.parser.add_argument('--sample-num-frames', type=int, default=10, help=' the number of frames returned for each sequence, i.e. the number of input/output pairs.')
+        self.parser.add_argument('--data-rot-rep', type=str, default='mat', choices=['aa', 'mat', '6d'], help='the rotation representation for the INPUT data. [aa, mat, 6d] Output data is always given as a rotation matrix.')
+
+        self.parser.add_argument('--data-steps-in', dest='step_frames_in', type=int, default=1, help='At each step of the sequence, the number of input frames.')
+        self.parser.add_argument('--data-steps-out', dest='step_frames_out', type=int, default=1, help='At each step of the sequence, the number of output frames.')
+        self.parser.add_argument('--data-out-step-size', dest='frames_out_step_size', type=int, default=1, help='Spacing between the output frames.')
+
+        self.parser.add_argument('--data-return-config', type=str, default='smpl+joints+contacts', choices=['smpl+joints', 'smpl+joints+contacts', 'all'], help='which values to return from the data loader')
+        self.parser.add_argument('--data-noise-std', type=float, default=0.0, help='Standard deviation for gaussian noise to add to input motion.')
+
+class GimoDiscreteDatasetConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to models.AmassDiscreteDataset dataset class.
+    '''
+    def __init__(self, argv):
+        super(GimoDiscreteDatasetConfig, self).__init__(argv)
+        # arguments specific to this dataset
+        self.parser.add_argument('--data-paths', type=str, nargs='+', required=True, help='Paths to dataset roots.')
         self.parser.add_argument('--splits-path', type=str, default=None, help='Path to data splits to use.')
         self.parser.add_argument('--sample-num-frames', type=int, default=10, help=' the number of frames returned for each sequence, i.e. the number of input/output pairs.')
         self.parser.add_argument('--data-rot-rep', type=str, default='mat', choices=['aa', 'mat', '6d'], help='the rotation representation for the INPUT data. [aa, mat, 6d] Output data is always given as a rotation matrix.')
