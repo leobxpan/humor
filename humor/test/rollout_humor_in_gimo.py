@@ -7,9 +7,10 @@ import importlib, time
 
 import glob
 import json
+from collections import defaultdict
+import pickle
 
 import numpy as np
-
 import trimesh
 
 from plyfile import PlyData
@@ -17,9 +18,10 @@ from plyfile import PlyData
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-torch.manual_seed(0)
-np.random.seed(42)
+# torch.manual_seed(0)
+# np.random.seed(42)
 
 from utils.config import TestConfig
 from utils.logging import Logger, class_name_to_file_name, mkdir, cp_files
@@ -32,6 +34,8 @@ from losses.humor_loss import CONTACT_THRESH
 
 NUM_WORKERS = 0
 ADDT_COL_HOR = 10
+
+rollout_times = 1
 
 def parse_args(argv):
     # create config and parse args
@@ -256,14 +260,9 @@ def test(args_obj, config_file):
     elif args.test_on_val:
         Logger.log('WARNING: running evaluation on VALIDATION data as requested...should only be used for debugging!')
     Dataset = getattr(importlib.import_module('datasets.' + dataset_file), args.dataset)
-    split = 'test'
-    if args.test_on_train:
-        split = 'train'
-    elif args.test_on_val:
-        split = 'val'
+    split = 'train'
     test_dataset = Dataset(split=split, **args_obj.dataset_dict)
     test_dataset[0]
-
     # only select a subset of data
     #subset_indices = np.random.choice(len(test_dataset), size=args.num_batches, replace=False)
     #subset_sampler = torch.utils.data.SubsetRandomSampler(subset_indices)
@@ -315,6 +314,7 @@ def test(args_obj, config_file):
 
     if args.eval_sampling or args.eval_sampling_debug:
         eval_sampling(model, test_dataset, test_loader, device,
+                            split=split,
                             out_dir=args.out if args.eval_sampling else None,
                             num_samples=args.eval_num_samples,
                             samp_len=args.eval_sampling_len,
@@ -329,6 +329,7 @@ def test(args_obj, config_file):
     Logger.log('Finished!')
 
 def eval_sampling(model, test_dataset, test_loader, device,
+                  split,
                   out_dir=None,
                   num_samples=1,
                   samp_len=10.0,
@@ -356,15 +357,22 @@ def eval_sampling(model, test_dataset, test_loader, device,
 
     input_neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=1).to(device)
 
-    saved_batch_cnt = 0
-    max_batch = num_batches * 50                # give up on this scenes if evaluated over this number of samples
-    batch_cnt = 0
+    all_seqs = defaultdict(dict)
     with torch.no_grad():
         test_dataset.pre_batch()
         model.eval()
-        for i, data in enumerate(test_loader):
+        batch_cnt = 0
+        for i, data in tqdm(enumerate(test_loader)):
             # get inputs
             batch_in, batch_out, meta = data
+
+            seq_path = batch_in["seq_file_path"][0]
+            scene = seq_path.split("/")[-3]
+            seq = seq_path.split("/")[-2]
+            scene_seq = scene + ":" + seq
+
+            start_idx = batch_in["start_frame_idx"][0].item()
+
             print(meta['path'])
             seq_name_list = [spath[:-4] for spath in meta['path']]
             # if region_out_dir is None:
@@ -374,9 +382,7 @@ def eval_sampling(model, test_dataset, test_loader, device,
             #     print(batch_res_out_list)
             # continue
 
-            x_past, input_dict = model.prepare_input(batch_in, device, 
-                                                                                return_input_dict=True,
-                                                                                return_global_dict=True)
+            x_past, input_dict = model.prepare_input(batch_in, device, return_input_dict=True, return_global_dict=True)
 
             # roll out predicted motion
             B, T, _, _ = x_past.size()
@@ -386,158 +392,41 @@ def eval_sampling(model, test_dataset, test_loader, device,
                 rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
 
             # sample same trajectory multiple times and save the joints/contacts output
-            #for samp_idx in range(num_samples):
-            x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device), canonicalize_input=True, uncanonicalize_output=True)
+            samples_list = []
+            for samp_idx in range(rollout_times):
+                x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device), canonicalize_input=True, uncanonicalize_output=True)
 
-            imsize = (1080, 1080)
-            human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
-                            imw=imsize[0],
-                            imh=imsize[1],
-                            show_smpl_joints=viz_smpl_joints,
-                            show_pred_joints=viz_pred_joints,
-                            show_contacts=viz_contacts
-                          )
+                x_pred_dict_cpu = {k: v.cpu() for k, v in x_pred_dict.items()}
+                samples_list.append(x_pred_dict_cpu)
 
-            for i in range(10):
-                trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
+                with open('../smplh_dict.pkl', 'wb') as f:
+                    pickle.dump(x_pred_dict_cpu, f)
 
-            # human_verts, human_faces = viz_eval_samp(rollout_input_dict, meta, input_neutral_bm,
-            #                 imw=imsize[0],
-            #                 imh=imsize[1],
-            #                 show_smpl_joints=viz_smpl_joints,
-            #                 show_pred_joints=viz_pred_joints,
-            #                 show_contacts=viz_contacts
-            #               )
-            # trimesh.PointCloud(human_verts[0, 0]).export('hist.obj')
+                # visualization
+                imsize = (1080, 1080)
+                human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
+                                imw=imsize[0],
+                                imh=imsize[1],
+                                show_smpl_joints=viz_smpl_joints,
+                                show_pred_joints=viz_pred_joints,
+                                show_contacts=viz_contacts
+                              )
 
-            import pdb; pdb.set_trace()
+                for i in range(10):
+                    trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
+                import pdb; pdb.set_trace()
+
+                import pdb; pdb.set_trace()
+
+            all_seqs[scene_seq][start_idx] = samples_list
+            # batch_cnt += 1
+            # if batch_cnt >= 5: break
+
             continue
 
-            # translate the human to the scene
-            x_pred_dict, floor_z_max = translate_to_scene(x_pred_dict, house_name, region_name, return_floor=True)
-
-            # visualize and save
-            #print('Visualizing sample %d/%d!' % (samp_idx+1, num_samples))
-            imsize = (1080, 1080)
-            cur_res_out_list = batch_res_out_list
-            if region_out_dir is not None:
-                #cur_res_out_list = [out_path + '_samp%d' % (samp_idx) for out_path in batch_res_out_list]
-                cur_res_out_list = batch_res_out_list
-                imsize = (720, 720)
-            human_verts, human_faces = viz_eval_samp(global_gt_dict, x_pred_dict, meta, male_bm, female_bm, cur_res_out_list,
-                            imw=imsize[0],
-                            imh=imsize[1],
-                            show_smpl_joints=viz_smpl_joints,
-                            show_pred_joints=viz_pred_joints,
-                            show_contacts=viz_contacts
-                          )
-            human_verts = torch.from_numpy(human_verts).float().to(device).squeeze(0)
-
-            valid_verts_list = []
-            end_idx = 0                           # the index till where is the valid sequence
-            for f_idx in range(eval_qual_samp_len):
-                penetration_loss, in_penetration = check_if_valid(human_verts[f_idx: f_idx + 1], sdf, grid_min, grid_max, grid_dim, \
-                    voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
-
-                #print("penetration loss:", penetration_loss)
-                if penetration_loss > penetration_loss_threshold:
-                    # if len(valid_verts_list) >= min_valid_seq_len:
-                    end_idx = f_idx
-                    break
-                else:
-                    valid_verts_list.append(human_verts[f_idx])
-                #valid_verts_list.append(human_verts[f_idx])
-            
-            if len(valid_verts_list) == eval_qual_samp_len:
-                end_idx = eval_qual_samp_len
-
-            if save_seq_len:
-                seq_len = save_seq_len
-            else:
-                seq_len = end_idx
-
-            if len(valid_verts_list) >= min_seq_len:
-                # filter to have only forward motion
-                if not seq_is_forward_walking(x_pred_dict, end_idx, check_hor=10, check_thresh=0.2):
-                    continue
-
-                all_addt_penetration_labels = []
-                all_addt_col_verts = []
-                addt_time_steps = []
-                if end_idx != eval_qual_samp_len:
-                    for i in range(ADDT_COL_HOR):
-                        if end_idx + 1 + i >= eval_qual_samp_len:
-                            break
-                        addt_penetration_loss, addt_in_penetration = check_if_valid(human_verts[end_idx + 1 + i: end_idx + 2 + i], sdf, \
-                        grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight, floor_z_max=floor_z_max)
-
-                        if addt_penetration_loss < penetration_loss_threshold:
-                            continue
-                        else:
-                            addt_penetration_label, addt_verts_in_penetration = process_penetration(addt_in_penetration.squeeze(), human_verts[end_idx + 1 + i], x_pred_dict['joints'][0, end_idx + 1 + i], debug=True, counts_thresh=50)
-
-                            if addt_penetration_label[0] == 100.:
-                                continue
-                            else:
-                                all_addt_penetration_labels.append(addt_penetration_label.cpu().numpy())
-                                all_addt_col_verts.append(addt_verts_in_penetration.cpu().numpy())
-                                addt_time_steps.append(i)
-
-                # If longer than minimum sequence length, save motion sequence and collision supervision
-                valid_verts_seq = torch.stack(valid_verts_list[-seq_len:]).to(device).squeeze(0)
-                #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)
-                #valid_verts_seq = torch.stack(valid_verts_list).to(device).squeeze(0)[:20, ...]
-                os.makedirs(cur_res_out_list[0], exist_ok=False)
-                if write_obj: 
-                    for t_idx in range(seq_len):
-                        dest_mesh_path = os.path.join(cur_res_out_list[0], "%05d"%(t_idx) + ".obj")
-                        write_to_obj(dest_mesh_path, valid_verts_seq[t_idx].data.cpu().numpy(), human_faces.data.cpu().numpy())
-                
-                #if end_idx == eval_qual_samp_len:
-                #    continue
-
-                if end_idx == eval_qual_samp_len:
-                    # no collision happening in this sequence
-                    penetration_label = torch.tensor([100], device=device) 
-                else:
-                    if debug:
-                        penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=0)
-                        verts_path = os.path.join(cur_res_out_list[0], 'verts_in_penetration.npy')
-                        np.save(verts_path, verts_in_penetration.cpu().numpy())
-                    else:
-                        penetration_label, verts_in_penetration = process_penetration(in_penetration.squeeze(), human_verts[end_idx], x_pred_dict['joints'][0, end_idx], debug=True, counts_thresh=50)
-
-                #penetration_label = process_label(penetration_label, dataset_type)
-
-                penetration_label_path = os.path.join(cur_res_out_list[0], 'penetration_label.npy')
-                np.save(penetration_label_path, penetration_label.cpu().numpy())
-
-                if all_addt_penetration_labels:
-                    for i in range(len(addt_time_steps)):
-                        time_step = addt_time_steps[i]
-                        addt_col_verts_path = os.path.join(cur_res_out_list[0], 'addt_col_verts_%02d.npy'%(time_step))
-                        addt_penetration_label_path = os.path.join(cur_res_out_list[0], 'addt_penetration_label_%02d.npy'%(time_step))
-
-                        np.save(addt_penetration_label_path, all_addt_penetration_labels[i])
-                        np.save(addt_col_verts_path, all_addt_col_verts[i])
-
-                if penetration_label[0] != 100.:
-                    col_verts_path = os.path.join(cur_res_out_list[0], 'col_verts.npy')
-                    np.save(col_verts_path, verts_in_penetration.cpu().numpy())
-
-                dest_npz_path = os.path.join(cur_res_out_list[0], "motion_seq.npz")
-                cano_rot_inv = torch.eye(4).to(x_past.device)
-                gen_data_npz(x_pred_dict, meta, seq_len, end_idx, cano_rot_inv, dest_npz_path)
-
-                saved_batch_cnt += 1
-                if saved_batch_cnt >= num_batches:
-                    break
-
-            print("saved:", saved_batch_cnt)
-            print("all:", batch_cnt)
-            batch_cnt += 1
-            if batch_cnt >= max_batch:
-                break
+        save_pickle_path = "./rollout_humor_scripts/all_scenes_stride_1/humor_gen_seqs/%s_seqs.pkl"%split
+        with open(save_pickle_path, 'wb') as f:
+            pickle.dump(all_seqs, f)
 
 def translate_to_scene(x_pred_dict, house_name, region_name, return_floor=False):
     """Translate the human location to a random location on the floor."""

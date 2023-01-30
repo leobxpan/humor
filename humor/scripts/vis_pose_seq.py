@@ -15,7 +15,7 @@ from viz.utils import viz_smpl_seq, create_video
 neutral_bm_path = os.path.join(SMPLX_PATH, 'SMPLX_NEUTRAL.npz')
 #neutral_bm_path = os.path.join(SMPLH_PATH, 'neutral/model.npz')
 
-seq = "/scr/bxpan/gimo_processed/kitchen0214/2022-02-14-073443/poses_2399_frames_30_fps.npz"
+seq = "/scr/bxpan/gimo_processed/seminar_room0_0219/2022-02-18-223709/poses_3475_frames_30_fps.npz"
 #seq = "/orion/u/bxpan/exoskeleton/gaze_dataset/bedroom0122/2022-01-21-194925/poses.npz"
 #seq = "/scr-ssd/bxpan/gimo_processed/bedroom0122/2022-01-21-194925/bedroom0122_2022-01-21-194925_poses_838_frames_30_fps.npz"
 seq = np.load(seq, allow_pickle=True)
@@ -35,7 +35,7 @@ body_pred = neutral_bm(pose_body=torch.from_numpy(seq['pose_body']).float(), \
                        root_orient=torch.from_numpy(seq['root_orient']).float(), \
                        trans=torch.from_numpy(seq['trans']).float())
 
-idx = 1281
+idx = 2176
 trimesh.PointCloud(body_pred.v[idx].detach().cpu().numpy()).export('hist.obj')
 import pdb; pdb.set_trace()
 viz_smpl_seq(body_pred, use_offscreen=True)
