@@ -260,7 +260,7 @@ def test(args_obj, config_file):
     elif args.test_on_val:
         Logger.log('WARNING: running evaluation on VALIDATION data as requested...should only be used for debugging!')
     Dataset = getattr(importlib.import_module('datasets.' + dataset_file), args.dataset)
-    split = 'train'
+    split = 'test'
     test_dataset = Dataset(split=split, **args_obj.dataset_dict)
     test_dataset[0]
     # only select a subset of data
@@ -399,24 +399,24 @@ def eval_sampling(model, test_dataset, test_loader, device,
                 x_pred_dict_cpu = {k: v.cpu() for k, v in x_pred_dict.items()}
                 samples_list.append(x_pred_dict_cpu)
 
-                with open('../smplh_dict.pkl', 'wb') as f:
-                    pickle.dump(x_pred_dict_cpu, f)
+                # with open('../smplh_dict.pkl', 'wb') as f:
+                #     pickle.dump(x_pred_dict_cpu, f)
 
                 # visualization
-                imsize = (1080, 1080)
-                human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
-                                imw=imsize[0],
-                                imh=imsize[1],
-                                show_smpl_joints=viz_smpl_joints,
-                                show_pred_joints=viz_pred_joints,
-                                show_contacts=viz_contacts
-                              )
+                # imsize = (1080, 1080)
+                # human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
+                #                 imw=imsize[0],
+                #                 imh=imsize[1],
+                #                 show_smpl_joints=viz_smpl_joints,
+                #                 show_pred_joints=viz_pred_joints,
+                #                 show_contacts=viz_contacts
+                #               )
 
-                for i in range(10):
-                    trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
-                import pdb; pdb.set_trace()
+                # for i in range(10):
+                #     trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
+                # import pdb; pdb.set_trace()
 
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
 
             all_seqs[scene_seq][start_idx] = samples_list
             # batch_cnt += 1
