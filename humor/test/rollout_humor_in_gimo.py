@@ -35,7 +35,7 @@ from losses.humor_loss import CONTACT_THRESH
 NUM_WORKERS = 0
 ADDT_COL_HOR = 10
 
-rollout_times = 1
+rollout_times = 5
 
 def parse_args(argv):
     # create config and parse args

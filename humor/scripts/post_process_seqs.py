@@ -1,5 +1,5 @@
 # post process the saved humor rollout sequences to get the vposer latents
-# this script does not change the coordinate frame, so the processed data is still in the humor frame
+# this script also changes the coordinate frame to yup, i.e. world frame of GIMO
 
 import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
@@ -13,6 +13,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 import trimesh
+
+from tqdm import tqdm
 
 from human_body_prior.tools.model_loader import load_vposer
 from human_body_prior.tools.rotation_tools import matrot2aa
@@ -64,16 +66,18 @@ humor_seqs_path = "./rollout_humor_scripts/all_scenes_stride_1/humor_gen_seqs/te
 with open(humor_seqs_path, 'rb') as f:
     humor_seqs = pickle.load(f)
 
-for scene_seq, scene_seq_dict in humor_seqs.items():
-    for start_idx, subseq_list in scene_seq_dict.items():
+for scene_seq, scene_seq_dict in tqdm(humor_seqs.items()):
+    for start_idx, subseq_list in tqdm(scene_seq_dict.items()):
         for i in range(len(subseq_list)):
             seq = subseq_list[i]            # this is the actual dict for a seq
 
             pose_body = matrot2aa(seq["pose_body"].reshape((-1, 3, 3))).view(150, -1, 3)
             latents = vposer.encode(pose_body.reshape((150, -1))).rsample()
             seq["latents"] = latents.cpu()
-            seq["root_orient"] = matrot2aa(seq["root_orient"].view(-1, 3, 3)).view(150, 3)
-            seq["trans"] = seq["trans"].squeeze(0)
+            seq["pose_body"] = pose_body.cpu()
+
+            root_orient = matrot2aa(seq["root_orient"].view(-1, 3, 3)).view(150, 3)
+            trans = seq["trans"].squeeze(0)
 
             # transform to y-up
             pose = {}
@@ -83,8 +87,8 @@ for scene_seq, scene_seq_dict in humor_seqs.items():
             pose["transl"] = torch.zeros(150, 3)
             smplx_output = body_mesh_model(return_verts=True, **pose)
 
-            pelvis = smplx_output.joints[:, 0].detach().cpu().numpy()
-            root_orient, trans = batch_to_yup(seq["root_orient"], seq["trans"].cpu().numpy(), pelvis)
+            pelvis_offset = smplx_output.joints[:, 0].detach().cpu().numpy()
+            root_orient, trans = batch_to_yup(root_orient, trans.cpu().numpy(), pelvis_offset)
 
             seq["root_orient"] = root_orient
             seq["trans"] = trans
@@ -101,14 +105,18 @@ for scene_seq, scene_seq_dict in humor_seqs.items():
             #     out_mesh.export('before_%d.obj'%i)
 
             # # after transformation
-            # pose["global_orient"] = torch.tensor(root_orient).float()
-            # pose["transl"] = torch.tensor(trans).float()
-            # smplx_output = body_mesh_model(return_verts=True, **pose)
+            pose["global_orient"] = torch.tensor(root_orient).float()
+            pose["transl"] = torch.tensor(trans).float()
+            smplx_output = body_mesh_model(return_verts=True, **pose)
             # body_verts_batch = smplx_output.vertices
             # smplx_faces = body_mesh_model.faces
             # for i in range(10):
             #     out_mesh = trimesh.Trimesh(body_verts_batch[i].detach().cpu().numpy(), smplx_faces, process=False)
             #     out_mesh.export('after_%d.obj'%i)
+
+            # get joints location in world frame
+            joints_pos = smplx_output.joints
+            seq["joints"] = joints_pos.detach().cpu()
 
 with open(humor_seqs_path.replace('.pkl', '_yup.pkl'), 'wb') as f:
     pickle.dump(humor_seqs, f)
