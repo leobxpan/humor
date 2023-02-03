@@ -35,7 +35,7 @@ from losses.humor_loss import CONTACT_THRESH
 NUM_WORKERS = 0
 ADDT_COL_HOR = 10
 
-rollout_times = 5
+rollout_times = 10
 
 def parse_args(argv):
     # create config and parse args
@@ -261,6 +261,7 @@ def test(args_obj, config_file):
         Logger.log('WARNING: running evaluation on VALIDATION data as requested...should only be used for debugging!')
     Dataset = getattr(importlib.import_module('datasets.' + dataset_file), args.dataset)
     split = 'test'
+    #split = 'train'
     test_dataset = Dataset(split=split, **args_obj.dataset_dict)
     test_dataset[0]
     # only select a subset of data
@@ -269,7 +270,7 @@ def test(args_obj, config_file):
     # create loaders
     test_loader = DataLoader(test_dataset, 
                             batch_size=args.batch_size,
-                            shuffle=True,
+                            shuffle=False,
                             #sampler=subset_sampler,
                             num_workers=NUM_WORKERS,
                             pin_memory=True,
@@ -353,52 +354,60 @@ def eval_sampling(model, test_dataset, test_loader, device,
     # male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
     # female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
     neutral_bm_path = os.path.join(SMPLX_PATH, 'SMPLX_NEUTRAL.npz')
-    neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
-
-    input_neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=1).to(device)
+    #neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
+    neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=eval_qual_samp_len).cpu()
 
     all_seqs = defaultdict(dict)
     with torch.no_grad():
         test_dataset.pre_batch()
         model.eval()
-        batch_cnt = 0
-        for i, data in tqdm(enumerate(test_loader)):
-            # get inputs
-            batch_in, batch_out, meta = data
+        for t in range(rollout_times):
+            # loop through dataset rollout_times times
+            batch_cnt = 0
+            for i, data in tqdm(enumerate(test_loader)):
+                # get inputs
+                batch_in, batch_out, meta = data
 
-            seq_path = batch_in["seq_file_path"][0]
-            scene = seq_path.split("/")[-3]
-            seq = seq_path.split("/")[-2]
-            scene_seq = scene + ":" + seq
+                batch_size = len(batch_in["seq_file_path"])
+                seq_paths = batch_in["seq_file_path"]
+                scenes = [path.split("/")[-3] for path in seq_paths]
+                seqs = [path.split("/")[-2] for path in seq_paths]
+                scene_seqs = [scene + ":" + seq for scene, seq in zip(scenes, seqs)]
 
-            start_idx = batch_in["start_frame_idx"][0].item()
+                start_inds = batch_in["start_frame_idx"]
 
-            print(meta['path'])
-            seq_name_list = [spath[:-4] for spath in meta['path']]
-            # if region_out_dir is None:
-            #     batch_res_out_list = [None]*len(seq_name_list)
-            # else:
-            #     batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
-            #     print(batch_res_out_list)
-            # continue
+                print(meta['path'])
+                seq_name_list = [spath[:-4] for spath in meta['path']]
+                # if region_out_dir is None:
+                #     batch_res_out_list = [None]*len(seq_name_list)
+                # else:
+                #     batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
+                #     print(batch_res_out_list)
+                # continue
 
-            x_past, input_dict = model.prepare_input(batch_in, device, return_input_dict=True, return_global_dict=True)
+                x_past, input_dict = model.prepare_input(batch_in, device, return_input_dict=True, return_global_dict=True)
 
-            # roll out predicted motion
-            B, T, _, _ = x_past.size()
-            x_past = x_past[:,0,:,:] # only need input for first step
-            rollout_input_dict = dict()
-            for k in input_dict.keys():
-                rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
+                # roll out predicted motion
+                B, T, _, _ = x_past.size()
+                x_past = x_past[:,0,:,:] # only need input for first step
+                rollout_input_dict = dict()
+                for k in input_dict.keys():
+                    rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
 
-            # sample same trajectory multiple times and save the joints/contacts output
-            samples_list = []
-            for samp_idx in range(rollout_times):
+                # sample same trajectory multiple times and save the joints/contacts output
                 x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device), canonicalize_input=True, uncanonicalize_output=True)
 
                 x_pred_dict_cpu = {k: v.cpu() for k, v in x_pred_dict.items()}
-                samples_list.append(x_pred_dict_cpu)
 
+                for i in range(batch_size):
+                    start_idx = start_inds[i].item()
+                    scene_seq = scene_seqs[i]
+
+                    pred_dict_i = {k: v[i].unsqueeze(0) for k, v in x_pred_dict_cpu.items()}
+                    if start_idx in all_seqs[scene_seq].keys():
+                        all_seqs[scene_seq][start_idx].append(pred_dict_i)
+                    else:
+                        all_seqs[scene_seq][start_idx] = [pred_dict_i]
                 # with open('../smplh_dict.pkl', 'wb') as f:
                 #     pickle.dump(x_pred_dict_cpu, f)
 
@@ -418,13 +427,21 @@ def eval_sampling(model, test_dataset, test_loader, device,
 
                 # import pdb; pdb.set_trace()
 
-            all_seqs[scene_seq][start_idx] = samples_list
-            # batch_cnt += 1
-            # if batch_cnt >= 5: break
+                # batch_cnt += 1
+                # if batch_cnt >= 3: break
 
-            continue
-
-        save_pickle_path = "./rollout_humor_scripts/all_scenes_stride_1/humor_gen_seqs/%s_seqs.pkl"%split
+        # for i in range(len((all_seqs['bedroom0122:2022-01-21-194925'][317]))):
+        #     seq_dict = (all_seqs['bedroom0122:2022-01-21-194925'][317])[i]
+        #     human_verts, human_faces = viz_eval_samp(seq_dict, meta, neutral_bm,
+        #                     imw=1080,
+        #                     imh=1080,
+        #                     show_smpl_joints=viz_smpl_joints,
+        #                     show_pred_joints=viz_pred_joints,
+        #                     show_contacts=viz_contacts
+        #                   )
+        #     for j in range(0, 150, 30):
+        #         trimesh.PointCloud(human_verts[0, j]).export('seq_%d_%d.obj'%(i, j))
+        save_pickle_path = "./rollout_humor_scripts/all_scenes_stride_1/humor_gen_seqs/%s_%dtimes_seqs.pkl"%(split, rollout_times)
         with open(save_pickle_path, 'wb') as f:
             pickle.dump(all_seqs, f)
 

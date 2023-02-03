@@ -576,6 +576,8 @@ class GimoDiscreteDataset(Dataset):
         data_in["seq_file_path"] = seq_file_path
         data_in["start_frame_idx"] = start_frame_idx
         data_in["end_frame_idx"] = end_frame_idx
+
+        meta["betas"] = torch.zeros(1, 10)
         return data_in, data_out, meta
 
 if __name__=='__main__':
