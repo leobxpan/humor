@@ -12,6 +12,7 @@ import pickle
 
 import numpy as np
 import trimesh
+from scipy.spatial.transform import Rotation as R
 
 from plyfile import PlyData
 
@@ -22,6 +23,11 @@ from tqdm import tqdm
 
 # torch.manual_seed(0)
 # np.random.seed(42)
+
+from human_body_prior.tools.model_loader import load_vposer
+from human_body_prior.tools.rotation_tools import matrot2aa
+
+import smplx
 
 from utils.config import TestConfig
 from utils.logging import Logger, class_name_to_file_name, mkdir, cp_files
@@ -34,8 +40,6 @@ from losses.humor_loss import CONTACT_THRESH
 
 NUM_WORKERS = 0
 ADDT_COL_HOR = 10
-
-rollout_times = 10
 
 def parse_args(argv):
     # create config and parse args
@@ -60,76 +64,20 @@ def write_to_obj(dest_obj_file, vertices, faces):
 
     w_f.close() 
 
-def seq_is_forward_walking(motion_seq, end_idx, check_hor=30, check_thresh=0.5):
-    root_ori = motion_seq["root_orient"].reshape(-1, 3, 3)
-    root_trans = motion_seq["joints"][0, :, 0, :]
+def batch_to_yup(root_orient, trans, pelvis):
+    # transform from z-up to y-up
+    rot_mat = np.array([
+        [1, 0, 0],
+        [0, 0, 1],
+        [0, -1, 0]
+      ])
+    root_orient_mat = R.from_rotvec(root_orient).as_matrix()
+    root_orient_mat = rot_mat @ root_orient_mat
+    root_orient = R.from_matrix(root_orient_mat).as_rotvec()
+ 
+    trans = (rot_mat @ (pelvis + trans).T).T - pelvis
 
-    dot_products = []
-    for t in range(end_idx-2, end_idx-2-check_hor, -1):
-        root_ori_t = root_ori[t]
-        root_ori_t_x = -root_ori_t[:, 0]
-        root_ori_t_y = root_ori_t[:, 2]
-        root_ori_t_z = root_ori_t[:, 1]
-        root_ori_t = torch.stack((root_ori_t_x, root_ori_t_y, root_ori_t_z), axis=1)
-        ori = root_ori_t @ torch.FloatTensor([0, 1, 0]).to(root_ori.device)
-        ori = ori / torch.norm(ori)
-
-        root_trans_t = root_trans[t, :]
-        root_trans_t1 = root_trans[t+1, :]
-        vel = root_trans_t1 - root_trans_t
-        vel_pred = motion_seq["trans_vel"][0, t, :]
-        vel = vel / torch.norm(vel)
-        #print("vel:", vel)
-        #print("vel_pred:", vel_pred)
-
-        dot_products.append(ori @ vel)
-    dot_products = torch.stack(dot_products)
-
-    print(dot_products)
-    if torch.all(dot_products > check_thresh):
-        return True
-    else:
-        return False
-
-def check_if_valid(vertices, sdf, grid_min, grid_max, grid_dim, voxel_size, sdf_penetration_weight, floor_z_max=-1e3):
-    # vertices: bs(1) X N X 3
-    # Compute scene penetration using signed distance field (SDF)
-    sdf_penetration_loss = 0.0
-    nv = vertices.shape[1]
-
-    sdf_ids = torch.round(
-        (vertices.squeeze() - grid_min) / voxel_size).to(dtype=torch.long)
-    sdf_ids.clamp_(min=0, max=grid_dim-1)
-
-    verts_above_floor_inds = (vertices[:, :, -1] > floor_z_max).squeeze()              # vertices that should be considered for collision check
-    verts_in_floor_inds = ~verts_above_floor_inds
-    #vertices = vertices[:, verts_above_floor_inds, :]
-
-    norm_vertices = (vertices - grid_min) / (grid_max - grid_min) * 2 - 1 # normalize to range(-1, 1)
-
-    body_sdf = F.grid_sample(sdf.view(1, 1, grid_dim, grid_dim, grid_dim),
-                                norm_vertices[:, :, [2, 1, 0]].view(1, nv, 1, 1, 3),
-                                #norm_vertices.view(1, nv, 1, 1, 3),
-                                padding_mode='border').squeeze()
-  
-    # if there are no penetrating vertices then set sdf_penetration_loss = 0
-    if body_sdf[verts_above_floor_inds].lt(0).sum().item() < 1:
-        sdf_penetration_loss = torch.tensor(0.0, dtype=vertices.dtype, device=vertices.device)
-    else:
-        sdf_penetration_loss = sdf_penetration_weight * body_sdf[verts_above_floor_inds][body_sdf[verts_above_floor_inds] < 0].abs().sum()
-
-    in_penetration = (body_sdf < 0)
-    in_penetration[verts_in_floor_inds] = False
-    return sdf_penetration_loss, in_penetration
-
-def reject_outliers(data, m = 2., return_idx=False):
-    d = np.abs(data - np.median(data))
-    mdev = np.median(d)
-    s = d/mdev if mdev else 0.
-    if return_idx:
-        return data[s<m], s<m
-    else:
-        return data[s<m]
+    return root_orient, trans
 
 def gen_data_npz(x_pred_dict, meta, actual_t, end_idx, cano_rot_inv, dest_npz_path):
     # x_pred_dict: contains data in the canonical frame of the first frame's pose. 
@@ -260,15 +208,19 @@ def test(args_obj, config_file):
     elif args.test_on_val:
         Logger.log('WARNING: running evaluation on VALIDATION data as requested...should only be used for debugging!')
     Dataset = getattr(importlib.import_module('datasets.' + dataset_file), args.dataset)
-    split = 'test'
-    #split = 'train'
-    test_dataset = Dataset(split=split, **args_obj.dataset_dict)
-    test_dataset[0]
+    all_dataset = Dataset(split=args.split, **args_obj.dataset_dict)
+    # jobs_size = len(all_dataset) // args.num_workers
+    # job_start_idx = args.worker_id * jobs_size
+    # job_end_idx = job_start_idx + jobs_size
+    # jobs_inds = list(range(job_start_idx, job_end_idx))
+    # split_dataset = torch.utils.data.Subset(all_dataset, jobs_inds)
+
+    all_dataset[0]
     # only select a subset of data
     #subset_indices = np.random.choice(len(test_dataset), size=args.num_batches, replace=False)
     #subset_sampler = torch.utils.data.SubsetRandomSampler(subset_indices)
     # create loaders
-    test_loader = DataLoader(test_dataset, 
+    test_loader = DataLoader(all_dataset, 
                             batch_size=args.batch_size,
                             shuffle=False,
                             #sampler=subset_sampler,
@@ -277,8 +229,14 @@ def test(args_obj, config_file):
                             drop_last=False,
                             worker_init_fn=lambda _: np.random.seed())
 
-    test_dataset.return_global = False
-    model.dataset = test_dataset
+    all_dataset.return_global = False
+    model.dataset = all_dataset
+
+    # sample only needed frames from humor rollout
+    fps = 2
+    orig_fps = 30
+    horizon = 150               # 150 future frames
+    humor_sampled_inds = np.arange(orig_fps / fps - 1, horizon, orig_fps / fps)
 
     if args.eval_full_test:
         Logger.log('Running full test set evaluation...')
@@ -314,8 +272,10 @@ def test(args_obj, config_file):
             test_dataset.pre_batch()
 
     if args.eval_sampling or args.eval_sampling_debug:
-        eval_sampling(model, test_dataset, test_loader, device,
-                            split=split,
+        eval_sampling(model, all_dataset, test_loader, args.orig_data_root,
+                            device, args.rollout_times,
+                            humor_sampled_inds,
+                            args.split, args.worker_id, args.num_workers,
                             out_dir=args.out if args.eval_sampling else None,
                             num_samples=args.eval_num_samples,
                             samp_len=args.eval_sampling_len,
@@ -329,8 +289,9 @@ def test(args_obj, config_file):
 
     Logger.log('Finished!')
 
-def eval_sampling(model, test_dataset, test_loader, device,
-                  split,
+def eval_sampling(model, test_dataset, test_loader, orig_data_root, 
+                  device, rollout_times, humor_sampled_inds,
+                  split, worker_id, num_workers,
                   out_dir=None,
                   num_samples=1,
                   samp_len=10.0,
@@ -353,82 +314,137 @@ def eval_sampling(model, test_dataset, test_loader, device,
     # female_bm_path = os.path.join(SMPLH_PATH, 'female/model.npz')
     # male_bm = BodyModel(bm_path=male_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
     # female_bm = BodyModel(bm_path=female_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
+
     neutral_bm_path = os.path.join(SMPLX_PATH, 'SMPLX_NEUTRAL.npz')
     #neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=eval_qual_samp_len).to(device)
-    neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=eval_qual_samp_len).cpu()
+    neutral_bm = BodyModel(bm_path=neutral_bm_path, num_betas=16, batch_size=len(humor_sampled_inds)).to(device)
 
-    all_seqs = defaultdict(dict)
+    body_mesh_model = smplx.create(SMPLX_PATH,
+                                   model_type='smplx',
+                                   gender='neutral', ext='npz',
+                                   num_pca_comps=12,
+                                   create_global_orient=True,
+                                   create_body_pose=True,
+                                   create_betas=True,
+                                   create_left_hand_pose=True,
+                                   create_right_hand_pose=True,
+                                   create_expression=True,
+                                   create_jaw_pose=True,
+                                   create_leye_pose=True,
+                                   create_reye_pose=True,
+                                   create_transl=True,
+                                   batch_size=len(humor_sampled_inds),
+                                   #batch_size=150,
+                                   num_betas=10,
+                                   num_expression_coeffs=10).to(device)
+
+    vposer, _ = load_vposer("../vposer_v1_0", vp_model='snapshot')
+    vposer = vposer.to(device)
+
     with torch.no_grad():
-        test_dataset.pre_batch()
         model.eval()
-        for t in range(rollout_times):
+        batch_cnt = 0
+        for i, data in tqdm(enumerate(test_loader)):
+            # get inputs
+            batch_in, batch_out, meta = data
+
+            batch_size = len(batch_in["seq_file_path"])
+            seq_paths = batch_in["seq_file_path"]
+            scenes = [path.split("/")[-3] for path in seq_paths]
+            seqs = [path.split("/")[-2] for path in seq_paths]
+            scene_seqs = [scene + ":" + seq for scene, seq in zip(scenes, seqs)]
+
+            start_inds = batch_in["start_frame_idx"]
+
+            #print(meta['path'])
+            seq_name_list = [spath[:-4] for spath in meta['path']]
+            # if region_out_dir is None:
+            #     batch_res_out_list = [None]*len(seq_name_list)
+            # else:
+            #     batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
+            #     print(batch_res_out_list)
+            # continue
+
+            x_past, input_dict = model.prepare_input(batch_in, device, return_input_dict=True, return_global_dict=True)
+
+            # roll out predicted motion
+            B, T, _, _ = x_past.size()
+            x_past = x_past[:,0,:,:] # only need input for first step
+            rollout_input_dict = dict()
+            for k in input_dict.keys():
+                rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
+
+            batch_seqs = defaultdict(dict)
             # loop through dataset rollout_times times
-            batch_cnt = 0
-            for i, data in tqdm(enumerate(test_loader)):
-                # get inputs
-                batch_in, batch_out, meta = data
-
-                batch_size = len(batch_in["seq_file_path"])
-                seq_paths = batch_in["seq_file_path"]
-                scenes = [path.split("/")[-3] for path in seq_paths]
-                seqs = [path.split("/")[-2] for path in seq_paths]
-                scene_seqs = [scene + ":" + seq for scene, seq in zip(scenes, seqs)]
-
-                start_inds = batch_in["start_frame_idx"]
-
-                print(meta['path'])
-                seq_name_list = [spath[:-4] for spath in meta['path']]
-                # if region_out_dir is None:
-                #     batch_res_out_list = [None]*len(seq_name_list)
-                # else:
-                #     batch_res_out_list = [os.path.join(region_out_dir, seq_name.replace('/', '_') + '_b' + str(i) + 'seq' + str(sidx)) for sidx, seq_name in enumerate(seq_name_list)]
-                #     print(batch_res_out_list)
-                # continue
-
-                x_past, input_dict = model.prepare_input(batch_in, device, return_input_dict=True, return_global_dict=True)
-
-                # roll out predicted motion
-                B, T, _, _ = x_past.size()
-                x_past = x_past[:,0,:,:] # only need input for first step
-                rollout_input_dict = dict()
-                for k in input_dict.keys():
-                    rollout_input_dict[k] = input_dict[k][:,0,:,:] # only need first step
-
+            for t in range(rollout_times):
                 # sample same trajectory multiple times and save the joints/contacts output
-                x_pred_dict = model.roll_out(x_past, rollout_input_dict, eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device), canonicalize_input=True, uncanonicalize_output=True)
+                x_pred_dict = model.roll_out(x_past.clone(), rollout_input_dict.copy(), eval_qual_samp_len, gender=meta['gender'], betas=meta['betas'].to(device), canonicalize_input=True, uncanonicalize_output=True)
 
-                x_pred_dict_cpu = {k: v.cpu() for k, v in x_pred_dict.items()}
+                # x_pred_dict_cpu = {k: v.cpu() for k, v in x_pred_dict.items()}
 
                 for i in range(batch_size):
                     start_idx = start_inds[i].item()
                     scene_seq = scene_seqs[i]
 
-                    pred_dict_i = {k: v[i].unsqueeze(0) for k, v in x_pred_dict_cpu.items()}
-                    if start_idx in all_seqs[scene_seq].keys():
-                        all_seqs[scene_seq][start_idx].append(pred_dict_i)
+                    pred_dict_i = {k: v[i, torch.tensor(humor_sampled_inds).long()].unsqueeze(0) for k, v in x_pred_dict.items()}
+                    #pred_dict_i = {k: v[i].unsqueeze(0) for k, v in x_pred_dict.items()}
+
+                    if start_idx in batch_seqs[scene_seq].keys():
+                        batch_seqs[scene_seq][start_idx].append(pred_dict_i)
                     else:
-                        all_seqs[scene_seq][start_idx] = [pred_dict_i]
-                # with open('../smplh_dict.pkl', 'wb') as f:
-                #     pickle.dump(x_pred_dict_cpu, f)
+                        batch_seqs[scene_seq][start_idx] = [pred_dict_i]
 
-                # visualization
-                # imsize = (1080, 1080)
-                # human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
-                #                 imw=imsize[0],
-                #                 imh=imsize[1],
-                #                 show_smpl_joints=viz_smpl_joints,
-                #                 show_pred_joints=viz_pred_joints,
-                #                 show_contacts=viz_contacts
-                #               )
+            # save to files
+            for scene_seq, scene_seq_dict in batch_seqs.items():
 
-                # for i in range(10):
-                #     trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
-                # import pdb; pdb.set_trace()
+                scene, seq = scene_seq.split(":")[0], scene_seq.split(":")[1]
+                scene_seq_path = os.path.join(orig_data_root, scene, seq, "smplx_local")
 
-                # import pdb; pdb.set_trace()
+                for start_idx, seq_list in scene_seq_dict.items():
+                    if len(seq_list) != rollout_times:
+                        print("scene_seq: {} start_idx: {} not enough humor rollouts".format(scene_seq, start_idx))
 
-                # batch_cnt += 1
-                # if batch_cnt >= 3: break
+                    # for i in range(len(seq_list)):
+                    #     if start_idx == 400:
+                    #         human_verts, human_faces = viz_eval_samp(seq_list[i], meta, neutral_bm,
+                    #                         imw=1080,
+                    #                         imh=1080,
+                    #                         show_smpl_joints=viz_smpl_joints,
+                    #                         show_pred_joints=viz_pred_joints,
+                    #                         show_contacts=viz_contacts
+                    #                         )
+
+                    #         for j in range(10):
+                    #             trimesh.Trimesh(human_verts[0, j], human_faces.cpu()).export("before_seq_%d_step_%d.obj"%(i, j))
+
+                    # post process seqs
+                    processed_seq = post_process_seq(seq_list, vposer, body_mesh_model, len(humor_sampled_inds))
+
+                    pkl_path = os.path.join(scene_seq_path, "%d_6_10_1stride_2fps_%d_times_humor.pkl"%(start_idx, rollout_times))
+                    with open(pkl_path, 'wb') as f:
+                        pickle.dump(processed_seq, f)
+
+            # with open('../smplh_dict.pkl', 'wb') as f:
+            #     pickle.dump(x_pred_dict_cpu, f)
+
+            # visualization
+            # imsize = (1080, 1080)
+            # human_verts, human_faces = viz_eval_samp(x_pred_dict, meta, neutral_bm,
+            #                 imw=imsize[0],
+            #                 imh=imsize[1],
+            #                 show_smpl_joints=viz_smpl_joints,
+            #                 show_pred_joints=viz_pred_joints,
+            #                 show_contacts=viz_contacts
+            #               )
+
+            # for i in range(10):
+            #     trimesh.PointCloud(human_verts[0, i]).export('future_%d.obj'%i)
+            # import pdb; pdb.set_trace()
+
+            # import pdb; pdb.set_trace()
+
+            # batch_cnt += 1
+            # if batch_cnt >= 3: break
 
         # for i in range(len((all_seqs['bedroom0122:2022-01-21-194925'][317]))):
         #     seq_dict = (all_seqs['bedroom0122:2022-01-21-194925'][317])[i]
@@ -441,125 +457,65 @@ def eval_sampling(model, test_dataset, test_loader, device,
         #                   )
         #     for j in range(0, 150, 30):
         #         trimesh.PointCloud(human_verts[0, j]).export('seq_%d_%d.obj'%(i, j))
-        save_pickle_path = "./rollout_humor_scripts/all_scenes_stride_1/humor_gen_seqs/%s_%dtimes_seqs.pkl"%(split, rollout_times)
-        with open(save_pickle_path, 'wb') as f:
-            pickle.dump(all_seqs, f)
+        # with open(save_path, 'wb') as f:
+        #     pickle.dump(all_seqs, f)
 
-def translate_to_scene(x_pred_dict, house_name, region_name, return_floor=False):
-    """Translate the human location to a random location on the floor."""
-    scene_dir = "/orion/u/bxpan/exoskeleton/habitat_resources/mp3d/v1/scans/" + house_name
-    region_dir = os.path.join(scene_dir, "region_segmentations")
-
-    region_ply_path = os.path.join(region_dir, "{}.ply".format(region_name))
-    region_ply = PlyData.read(region_ply_path)
-
-    floor_face_ids = np.where(region_ply['face']['category_id'] == 4)
-    floor_vertex_ids = np.stack(region_ply['face']['vertex_indices'][floor_face_ids], axis=0).reshape(-1,)
-
-    rand_vertex_id = np.random.choice(floor_vertex_ids)
-    print("all_floor_vertex:", floor_vertex_ids.shape)
-    print("rand_vertex_id:", rand_vertex_id)
-
-    rand_vertex_x = region_ply['vertex']['x'][rand_vertex_id]
-    rand_vertex_y = region_ply['vertex']['y'][rand_vertex_id]
-    rand_vertex_z = region_ply['vertex']['z'][rand_vertex_id]
-
-    x_pred_dict['trans'][..., :] += torch.Tensor([rand_vertex_x, rand_vertex_y, rand_vertex_z]).to(x_pred_dict['trans'].device)
-    x_pred_dict['joints'] = x_pred_dict['joints'].view(x_pred_dict['joints'].shape[0], x_pred_dict['joints'].shape[1], -1, 3)
-    x_pred_dict['joints'] += torch.Tensor([rand_vertex_x, rand_vertex_y, rand_vertex_z]).to(x_pred_dict['joints'].device)
-   
-    if return_floor:
-        floor_z = region_ply['vertex']['z'][floor_vertex_ids]
-        inliers_z = reject_outliers(floor_z)
-        floor_z_max = inliers_z.max()
+def post_process_seq(seq_list, vposer, bm, seq_len):
+    processed_seqs = []
+    for i in range(len(seq_list)):
+        seq = seq_list[i]
         
-        return x_pred_dict, floor_z_max
-    else:
-        return x_pred_dict
+        pose_body = matrot2aa(seq["pose_body"].reshape((-1, 3, 3))).view(seq_len, -1, 3)
+        latents = vposer.encode(pose_body.reshape((seq_len, -1))).rsample()
+        seq["latents"] = latents.detach().cpu()
+        seq["pose_body"] = pose_body.cpu()
 
-def map_joints(penetration_label, dataset_type="map_10"):
-    """
-    Cluster penetration label to only a few important joints.
-    """
+        root_orient = matrot2aa(seq["root_orient"].view(-1, 3, 3)).view(seq_len, 3)
+        trans = seq["trans"].squeeze(0)
 
-    if dataset_type == "nomap_22":
-        return penetration_label
-    elif dataset_type == "map_10":
-        mapping_dict = {
-            0 : 0,
-            1 : 0,
-            2 : 0,
-            3 : 0,
-            6 : 0,
-            9 : 0,
-            13: 0,
-            14: 0,
-            16: 0,
-            17: 0,
-            18: 1,
-            19: 2,
-            20: 3,
-            21: 4,
-            12: 5,
-            15: 5,
-            4 : 6,
-            5 : 7,
-            7 : 8,
-            10: 8,
-            8 : 9,
-            11: 9,
-            100: 100,
-        }
+        # transform to y-up
+        pose = {}
+        pose["body_pose"] = pose_body
+        pose["pose_embedding"] = latents.detach()
+        pose["global_orient"] = torch.zeros(seq_len, 3).to(pose_body)
+        pose["transl"] = torch.zeros(seq_len, 3).to(pose_body)
+        smplx_output = bm(return_verts=True, **pose)
 
-        joint_ind_to_name_dict = {
-            0 : "torso",
-            1 : "leftForeArm",
-            2 : "rightForeArm",
-            3 : "leftHand",
-            4 : "rightHand",
-            5 : "head",
-            6 : "leftLeg",
-            7 : "rightLeg",
-            8 : "leftFoot",
-            9 : "rightFoot",
-            100: "noCollision"
-        }
+        pelvis_offset = smplx_output.joints[:, 0].detach().cpu().numpy()
+        root_orient, trans = batch_to_yup(root_orient.cpu(), trans.cpu().numpy(), pelvis_offset)
 
-        mapped_penetration_label = [mapping_dict[orig_label.item()] for orig_label in penetration_label]
-        mapped_penetration_label = torch.tensor(mapped_penetration_label, device=penetration_label.device)
-        #mapped_penetration_label = torch.unique(mapped_penetration_label, sorted=True)
+        seq["root_orient"] = root_orient
+        seq["trans"] = trans
 
-        return mapped_penetration_label
-    else:
-        raise ValueError('Unsupported dataset type: {}'.format(dataset_type))
+        # debug visualizations
+        # # before transformation
+        # pose["global_orient"] = seq["root_orient"]
+        # pose["transl"] = seq["trans"]
+        # smplx_output = body_mesh_model(return_verts=True, **pose)
+        # body_verts_batch = smplx_output.vertices
+        # smplx_faces = body_mesh_model.faces
+        # for i in range(10):
+        #     out_mesh = trimesh.Trimesh(body_verts_batch[i].detach().cpu().numpy(), smplx_faces, process=False)
+        #     out_mesh.export('before_%d.obj'%i)
 
-def process_penetration(in_penetration, vertices, joints, counts_thresh=100, debug=False, dataset_type="map_10"):
-    verts_in_penetration = vertices[in_penetration, :]
-    verts_dist_to_joints = torch.cdist(verts_in_penetration, joints)
-    penetration_joints = torch.argmin(verts_dist_to_joints, dim=1)
-    unique_penetration_joints, counts = torch.unique(penetration_joints, return_counts=True)
+        # # after transformation
+        pose["global_orient"] = torch.tensor(root_orient).to(pose_body)
+        pose["transl"] = torch.tensor(trans).to(pose_body)
 
-    unique_penetration_joints = map_joints(unique_penetration_joints, dataset_type)
-    unique_joints = torch.unique(unique_penetration_joints, return_counts=False)
-    new_counts = torch.zeros_like(unique_joints)
-    for i in range(unique_joints.shape[0]):
-        new_counts[i] = counts[(unique_penetration_joints == unique_joints[i]).nonzero(as_tuple=True)[0]].sum()
-    #print("counts:", counts)
-    joints_mask = new_counts >= counts_thresh
-    unique_joints = torch.masked_select(unique_joints, joints_mask)
+        smplx_output = bm(return_verts=True, **pose)
+        # body_verts_batch = smplx_output.vertices
+        # smplx_faces = body_mesh_model.faces
 
-    if debug:
-        if unique_joints.nelement() == 0:
-            unique_joints = torch.tensor([100]).to(vertices.device)
-            verts_mask = torch.tensor([]).to(vertices.device)
-            return unique_joints, verts_mask
-        else:
-            verts_mask = torch.tensor([1 if penetration_joint in unique_joints else 0 for penetration_joint in map_joints(penetration_joints, dataset_type)], device=verts_in_penetration.device).bool()
-            return unique_joints, verts_in_penetration[verts_mask]
-    else:
-        if unique_joints.nelement() == 0:
-            unique_joints = torch.tensor([100]).to(vertices.device)
-        return unique_joints
+        # get joints location in world frame
+        joints_pos = smplx_output.joints
+        seq["joints"] = joints_pos.detach().cpu()
+
+        processed_seqs.append(seq)
+
+        # for j in range(10):
+        #     trimesh.Trimesh(smplx_output.vertices[j].cpu().numpy(), bm.faces).export("after_seq_%d_step_%d.obj"%(i, j))
+
+    return processed_seqs
 
 def viz_eval_samp(x_pred_dict, meta, neutral_bm,
                     imw=720,

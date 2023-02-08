@@ -111,12 +111,6 @@ class GimoDiscreteDataset(Dataset):
         Logger.log('This split contains %d sequences (that meet the duration criteria).' % (self.num_seq))
         Logger.log('The dataset contains %d sub-sequences in total.' % (self.data_len))
     
-    def pre_batch(self, epoch=None):
-        '''
-        Gets dataset ready to load another batch.
-        '''
-        return False
-
     def parse_sequence_info(self, npz_file):
         ''' given npz file path, parses sequence duration from file name '''
         name_toks = npz_file[:-4].split('_')
