@@ -420,6 +420,10 @@ def eval_sampling(model, test_dataset, test_loader, orig_data_root,
                     # post process seqs
                     processed_seq = post_process_seq(seq_list, vposer, body_mesh_model, len(humor_sampled_inds))
 
+                    # put tensors on cpu
+                    for l in range(len(processed_seq)):
+                        processed_seq[l] = {k: v.cpu() if torch.is_tensor(v) else v for k, v in processed_seq[l].items()}
+
                     pkl_path = os.path.join(scene_seq_path, "%d_6_10_1stride_2fps_%d_times_humor.pkl"%(start_idx, rollout_times))
                     with open(pkl_path, 'wb') as f:
                         pickle.dump(processed_seq, f)
