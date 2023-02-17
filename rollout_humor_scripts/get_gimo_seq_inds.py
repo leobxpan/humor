@@ -1,6 +1,7 @@
 import os, sys
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
+sys.path.append(os.path.join(cur_file_path, '../..'))
 
 from collections import defaultdict
 import pickle
@@ -54,30 +55,34 @@ def main(cfg):
     train_dict = defaultdict(list)
     test_dict = defaultdict(list)
 
-    train_poses = np.load("./rollout_humor_scripts/all_scenes_stride_1/train_poses.npy")
-    train_seqs = np.load("./rollout_humor_scripts/all_scenes_stride_1/train_seqs.npy")
-    train_scenes = np.load("./rollout_humor_scripts/all_scenes_stride_1/train_scenes.npy")
-    train_start_end = np.load("./rollout_humor_scripts/all_scenes_stride_1/train_start_end.npy")
+    load_dir = os.path.join("humor/rollout_humor_scripts", "all_scenes_stride_{}_hist_{}_future_{}".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len']))
+
+    train_poses = np.load(os.path.join(load_dir, "train_poses.npy"))
+    train_seqs = np.load(os.path.join(load_dir, "train_seqs.npy"))
+    train_scenes = np.load(os.path.join(load_dir, "train_scenes.npy"))
+    train_start_end = np.load(os.path.join(load_dir, "train_start_end.npy"))
     assert (len(train_seqs) == len(train_scenes)) and (len(train_seqs) == len(train_start_end)) and (len(train_seqs) == len(train_poses)), "training seq lengths not same"
 
-    test_poses = np.load("./rollout_humor_scripts/all_scenes_stride_1/test_poses.npy")
-    test_seqs = np.load("./rollout_humor_scripts/all_scenes_stride_1/test_seqs.npy")
-    test_scenes = np.load("./rollout_humor_scripts/all_scenes_stride_1/test_scenes.npy")
-    test_start_end = np.load("./rollout_humor_scripts/all_scenes_stride_1/test_start_end.npy")
+    test_poses = np.load(os.path.join(load_dir, "test_poses.npy"))
+    test_seqs = np.load(os.path.join(load_dir, "test_seqs.npy"))
+    test_scenes = np.load(os.path.join(load_dir, "test_scenes.npy"))
+    test_start_end = np.load(os.path.join(load_dir, "test_start_end.npy"))
     assert (len(test_seqs) == len(test_scenes)) and (len(test_seqs) == len(test_start_end)) and (len(test_seqs) == len(test_poses)), "testing seq lengths not same"
 
     fps = cfg['data']['fps']
+    input_len = cfg['data']['input_seq_len']
+    output_len = cfg['data']['output_seq_len']
     for i in tqdm(range(len(train_seqs))):
         ego_idx = train_poses[i]
         scene = train_scenes[i]
         seq = train_seqs[i]
         start_frame, end_frame = train_start_end[i]
 
-        first_predict_idx = ego_idx + int((6 - 1) * 30 / fps) + 1
-        last_predict_idx = ego_idx + int(6 * 30 / fps) + int((10 - 1) * 30 / fps)
+        first_predict_idx = ego_idx + int((input_len - 1) * 30 / fps) + 1
+        last_predict_idx = ego_idx + int(input_len * 30 / fps) + int((output_len - 1) * 30 / fps)
         predict_inds = np.arange(first_predict_idx, last_predict_idx + 1, 1).tolist()
 
-        if len(predict_inds) != 150:
+        if len(predict_inds) != output_len * 30 / fps:
             print("training seq not complete, ", scene_seq_id)
 
         scene_seq_id = scene + "_" + seq
@@ -89,20 +94,20 @@ def main(cfg):
         seq = test_seqs[i]
         start_frame, end_frame = test_start_end[i]
 
-        first_predict_idx = ego_idx + int((6 - 1) * 30 / fps) + 1
-        last_predict_idx = ego_idx + int(6 * 30 / fps) + int((10 - 1) * 30 / fps)
+        first_predict_idx = ego_idx + int((input_len - 1) * 30 / fps) + 1
+        last_predict_idx = ego_idx + int(input_len * 30 / fps) + int((output_len - 1) * 30 / fps)
         predict_inds = np.arange(first_predict_idx, last_predict_idx + 1, 1).tolist()
 
-        if len(predict_inds) != 150:
-            print("testing seq not complete, ", scene_seq_id)
+        if len(predict_inds) != output_len * 30 / fps:
+            print("training seq not complete, ", scene_seq_id)
 
         scene_seq_id = scene + "_" + seq
         test_dict[scene_seq_id].append(predict_inds)
 
-    with open("./rollout_humor_scripts/all_scenes_stride_1/train_predict_dict.pkl", "wb") as f:
+    with open(os.path.join(load_dir, "train_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
         pickle.dump(train_dict, f)
 
-    with open("./rollout_humor_scripts/all_scenes_stride_1/test_predict_dict.pkl", "wb") as f:
+    with open(os.path.join(load_dir, "test_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
         pickle.dump(test_dict, f)
 
 if __name__ == '__main__':

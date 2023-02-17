@@ -233,9 +233,9 @@ def test(args_obj, config_file):
     model.dataset = all_dataset
 
     # sample only needed frames from humor rollout
-    fps = 2
+    fps = 30
     orig_fps = 30
-    horizon = 150               # 150 future frames
+    horizon = 60
     humor_sampled_inds = np.arange(orig_fps / fps - 1, horizon, orig_fps / fps)
 
     if args.eval_full_test:
@@ -424,7 +424,7 @@ def eval_sampling(model, test_dataset, test_loader, orig_data_root,
                     for l in range(len(processed_seq)):
                         processed_seq[l] = {k: v.cpu() if torch.is_tensor(v) else v for k, v in processed_seq[l].items()}
 
-                    pkl_path = os.path.join(scene_seq_path, "%d_6_10_1stride_2fps_%d_times_humor.pkl"%(start_idx, rollout_times))
+                    pkl_path = os.path.join(scene_seq_path, "%d_1_60_1stride_30fps_%d_times_humor.pkl"%(start_idx, rollout_times))
                     with open(pkl_path, 'wb') as f:
                         pickle.dump(processed_seq, f)
 

@@ -11,3 +11,5 @@ humor/vposer_v1_0
 *.zip
 *.obj
 *.pkl
+
+rollout_humor_scripts/*/

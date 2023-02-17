@@ -143,7 +143,6 @@ class GimoDiscreteDataset(Dataset):
             elif scene == "middle":
                 scene = "_".join(seq_id.split('_')[:2])
                 seq = seq_id[16:]
-                #import pdb; pdb.set_trace()
             assert scene in ALL_SCENES
 
             npz_path = glob.glob(os.path.join(data_root, scene, seq, "*.npz"))
@@ -159,11 +158,9 @@ class GimoDiscreteDataset(Dataset):
             if scene == "seminar":
                 scene = "_".join(scene_seq.split('_')[:3])
                 seq = scene_seq[19:]
-                #import pdb; pdb.set_trace()
             elif scene == "middle":
                 scene = "_".join(scene_seq.split('_')[:2])
                 seq = scene_seq[16:]
-                #import pdb; pdb.set_trace()
 
             assert scene in ALL_SCENES
 
@@ -177,7 +174,7 @@ class GimoDiscreteDataset(Dataset):
                 assert start_idx >= 0, "negative start idx"
 
                 end_idx = pred_inds[-1]
-                assert end_idx - start_idx == 150, "incorrect subseq length"
+                assert end_idx - start_idx == 60, "incorrect subseq length"
 
                 # start_idx is the input idx, end_idx is the last predicted idx (inclusive)
                 subseq_map[subseq_cnt] = (seq_id, start_idx, end_idx)
