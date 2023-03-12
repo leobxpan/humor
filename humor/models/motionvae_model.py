@@ -92,6 +92,7 @@ def step(model, loss_func, data, dataset, device, cur_epoch, mode='train', use_g
     gender_in = gender_in.reshape((B*T*S_out, 1))
     betas_in = meta['betas'].reshape((B, T, 1, -1)).expand((B, T, S_out, 16)).to(device)
     betas_in = betas_in.reshape((B*T*S_out, 16))
+
     loss, stats_dict = loss_func(out_dict, gt_dict, cur_epoch, gender=gender_in, betas=betas_in)
 
     return loss, stats_dict

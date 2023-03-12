@@ -3,6 +3,8 @@ import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
+os.environ['DISPLAY'] = ':1'
+
 import importlib, time
 
 import numpy as np
@@ -18,6 +20,7 @@ from utils.transforms import rotation_matrix_to_angle_axis
 from body_model.utils import SMPL_JOINTS
 from datasets.amass_utils import NUM_KEYPT_VERTS, CONTACT_INDS
 from losses.humor_loss import CONTACT_THRESH
+
 
 NUM_WORKERS = 0
 
@@ -186,6 +189,7 @@ def eval_sampling(model, test_dataset, test_loader, device,
         if not os.path.exists(res_out_dir):
             os.mkdir(res_out_dir)
 
+    test_dataset[100]
     J = len(SMPL_JOINTS)
     V = NUM_KEYPT_VERTS
     male_bm_path = os.path.join(SMPLH_PATH, 'male/model.npz')
@@ -198,6 +202,8 @@ def eval_sampling(model, test_dataset, test_loader, device,
         model.eval()
         for i, data in enumerate(test_loader):
             # get inputs
+
+            import pdb; pdb.set_trace()
             batch_in, batch_out, meta = data
             print(meta['path'])
             seq_name_list = [spath[:-4] for spath in meta['path']]

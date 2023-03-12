@@ -53,7 +53,7 @@ SMPL_JOINTS_RETURN_CONFIG = {
     'joints' : True,
     'joints_vel' : True,
     'joints_orient_vel' : False,
-    'verts' : False,
+    'verts' : True,
     'verts_vel' : False,
     'contacts' : False
 }
@@ -844,6 +844,7 @@ class AmassDiscreteDataset(Dataset):
         # prepare final output
         data_in = dict()
         data_out = dict()
+        import pdb; pdb.set_trace()
         for k, v in all_data_dict.items():
             if self.return_cfg[k]:
                 # add noise to inputs
