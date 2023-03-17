@@ -104,11 +104,11 @@ def main(cfg):
         scene_seq_id = scene + "_" + seq
         test_dict[scene_seq_id].append(predict_inds)
 
-    with open(os.path.join(load_dir, "train_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
-        pickle.dump(train_dict, f)
+    # with open(os.path.join(load_dir, "train_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
+    #     pickle.dump(train_dict, f)
 
-    with open(os.path.join(load_dir, "test_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
-        pickle.dump(test_dict, f)
+    # with open(os.path.join(load_dir, "test_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
+    #     pickle.dump(test_dict, f)
 
 if __name__ == '__main__':
     torch.manual_seed(0)

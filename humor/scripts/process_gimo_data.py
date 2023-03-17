@@ -90,10 +90,11 @@ def debug_viz_seq(body, fps, contacts=None):
     viz_smpl_seq(body, imw=1080, imh=1080, fps=fps, contacts=contacts,
             render_body=False, render_joints=True, render_skeleton=False, render_ground=True)
 
-def get_body_model_sequence(smplx_path, gender, num_frames,
+def get_body_model_sequence(smplh_path, gender, num_frames,
                   pose_body, pose_hand, betas, root_orient, trans):
     gender = str(gender)
-    bm_path = os.path.join(smplx_path, 'SMPLX_' + gender.upper() + '.npz')
+    #bm_path = os.path.join(smplx_path, 'SMPLX_' + gender.upper() + '.npz')
+    bm_path = os.path.join(smplh_path, "neutral", 'model.npz')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     bm = BodyModel(bm_path=bm_path, num_betas=NUM_BETAS, batch_size=num_frames).to(device)
 
@@ -491,18 +492,18 @@ def process_seq(data_paths):
             joint_orient_vel_seq = joint_orient_vel_seq[:,2]
             # exit()
 
-        # throw out edge frames for other data so velocities are accurate
-        num_frames = num_frames - 2
-        contacts = contacts[1:-1]
-        trans = trans[1:-1]
-        root_orient = root_orient[1:-1]
-        pose_body = pose_body[1:-1]
-        pose_hand = pose_hand[1:-1]
-        joint_seq = joint_seq[1:-1]
-        if SAVE_MOJO_VERTS:
-            vtx_seq = vtx_seq[1:-1]
-        if SAVE_JOINT_FRAME:
-            joints_world2aligned_rot = joints_world2aligned_rot[1:-1]
+        # NOT throwing out edge frames for other data so velocities are accurate to be consistent with GIMO indexing
+        # num_frames = num_frames - 2
+        # contacts = contacts[1:-1]
+        # trans = trans[1:-1]
+        # root_orient = root_orient[1:-1]
+        # pose_body = pose_body[1:-1]
+        # pose_hand = pose_hand[1:-1]
+        # joint_seq = joint_seq[1:-1]
+        # if SAVE_MOJO_VERTS:
+        #     vtx_seq = vtx_seq[1:-1]
+        # if SAVE_JOINT_FRAME:
+        #     joints_world2aligned_rot = joints_world2aligned_rot[1:-1]
 
     # downsample before saving
     if OUT_FPS != fps:
@@ -558,15 +559,16 @@ def process_seq(data_paths):
     # NOTE: debug viz
     if VIZ_SEQ:
         body = get_body_model_sequence(smplx_path, gender, num_frames,
-                            pose_body, pose_hand, betas, root_orient, trans)    
+                            pose_body, pose_hand, betas, root_orient, trans)
         # debug_viz_seq(body, fps, contacts=contacts)
-        viz_smpl_seq(body, imw=1080, imh=1080, fps=fps, contacts=contacts,
-            render_body=True, render_joints=True, render_skeleton=False, render_ground=True,
-            joints_seq=joint_seq) #,
-            # joints_vel=root_orient_vel_seq.reshape((-1, 1, 3)).repeat(22, axis=1))
-            # points_seq=vtx_seq,
-            # points_vel_seq=vtx_vel_seq)
-            # root_orient_vel_seq.reshape((-1, 1, 3)).repeat(22, axis=1)
+
+        # viz_smpl_seq(body, imw=1080, imh=1080, fps=fps, contacts=contacts,
+        #     render_body=True, render_joints=True, render_skeleton=False, render_ground=True,
+        #     joints_seq=joint_seq) #,
+        #     # joints_vel=root_orient_vel_seq.reshape((-1, 1, 3)).repeat(22, axis=1))
+        #     # points_seq=vtx_seq,
+        #     # points_vel_seq=vtx_vel_seq)
+        #     # root_orient_vel_seq.reshape((-1, 1, 3)).repeat(22, axis=1)
 
     if discard_seq:
         print('Terrain interaction detected, discarding...')
@@ -661,8 +663,8 @@ def main(config):
         all_seq_in_files += input_seqs
         all_seq_out_files += output_seqs
 
-    smplx_paths = [config.smplx_root]*len(all_seq_in_files)
-    data_paths = list(zip(all_seq_in_files, all_seq_out_files, smplx_paths))
+    smplh_paths = [config.smplh_root]*len(all_seq_in_files)
+    data_paths = list(zip(all_seq_in_files, all_seq_out_files, smplh_paths))
 
     for data_in in data_paths:
         process_seq(data_in)
@@ -676,7 +678,7 @@ if __name__ == "__main__":
     parser.add_argument('--gimo-root', type=str, default='./data/amass_raw', help='Root directory of raw AMASS dataset.')
     parser.add_argument('--datasets', type=str, nargs='+', default=ALL_DATASETS, help='Which datasets to process. By default processes all.')
     parser.add_argument('--out', type=str, default='./data/amass_processed', help='Root directory to save processed output to.')
-    parser.add_argument('--smplx-root', type=str, default='./body_models/smplx', help='Root directory of the SMPL-X body model.')
+    parser.add_argument('--smplh-root', type=str, default='./body_models/smplh', help='Root directory of the SMPL-X body model.')
 
     config = parser.parse_known_args()
     config = config[0]

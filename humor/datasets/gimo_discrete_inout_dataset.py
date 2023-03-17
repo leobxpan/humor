@@ -4,6 +4,7 @@ cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
 import glob, time, copy
+import pickle
 
 import numpy as np
 import torch
@@ -20,13 +21,14 @@ from body_model.utils import SMPL_JOINTS
 from utils.torch import copy2cpu as c2c
 from utils.transforms import batch_rodrigues, rot6d_to_rotmat, compute_world2aligned_joints_mat, matrot2axisangle
 
-class AmassDiscreteDataset(Dataset):
+ALL_SCENES = os.listdir("/scr/bxpan/gimo_processed/")
+
+class GimoDiscreteInOutDataset(Dataset):
     '''
     AMASS Motion Capture data subsampled to unified framerate.
     '''
     def __init__(self, split='train', 
                        data_paths=None, 
-                       split_by='dataset',
                        splits_path=None,
                        train_frac=0.8, val_frac=0.1,
                        sample_num_frames=10,
@@ -58,11 +60,12 @@ class AmassDiscreteDataset(Dataset):
         - deterministic_train : if True, does not randomly choose sequences for training split
         - custom_split : a list of datasets to use as the split if split_by is 'custom'
         '''
-        super(AmassDiscreteDataset, self).__init__()
+        super(GimoDiscreteInOutDataset, self).__init__()
 
         if data_paths is None:
             raise Exception('Must provide data paths')
         self.data_roots = data_paths
+        self.gimo_orig_root = "/scr/bxpan/gaze_dataset"
         Logger.log('Loading data from' + str(self.data_roots))
 
         self.splits_path = splits_path
@@ -72,12 +75,6 @@ class AmassDiscreteDataset(Dataset):
         else:
             print(SPLITS)
             raise Exception('Not a valid split: %s' % (split))
-
-        if split_by in SPLIT_BY:
-            self.split_by = split_by
-        else:
-            print(SPLIT_BY)
-            raise Exception('Not a valid way to split data: %s' % (split_by))
 
         if data_rot_rep not in ROT_REPS:
             print(ROT_REPS)
@@ -102,7 +99,8 @@ class AmassDiscreteDataset(Dataset):
         self.custom_split = custom_split
 
         # based on the number of input and output frames (need self.sample_num_frames inputs and outputs)
-        self.effective_seq_len = self.sample_num_frames + 1 + (self.step_frames_out-1)*self.frames_out_step_size  # number of frames we need to subsample to build a data sequence
+        #self.effective_seq_len = self.sample_num_frames + 1 + (self.step_frames_out-1)*self.frames_out_step_size  # number of frames we need to subsample to build a data sequence
+        self.effective_seq_len = self.sample_num_frames
 
         # prepare paths to sequences and their durations (in seconds, to determine sampling probability irrespective of fps)
         # "length" of dataset is how many subsequences we can chop it into
@@ -114,12 +112,6 @@ class AmassDiscreteDataset(Dataset):
         Logger.log('This split contains %d sequences (that meet the duration criteria).' % (self.num_seq))
         Logger.log('The dataset contains %d sub-sequences in total.' % (self.data_len))
     
-    def pre_batch(self, epoch=None):
-        '''
-        Gets dataset ready to load another batch.
-        '''
-        return False
-
     def parse_sequence_info(self, npz_file):
         ''' given npz file path, parses sequence duration from file name '''
         name_toks = npz_file[:-4].split('_')
@@ -131,151 +123,37 @@ class AmassDiscreteDataset(Dataset):
     def load_data(self):
         sequence_paths = []
         sequence_info = []
+        subseq_map = {}
 
-        if self.split_by == 'single':
-            npz_file = self.data_roots[0]
-            np.load(npz_file) # as a sanity check
-            # get seq info
-            seq_info = self.parse_sequence_info(npz_file)
+        subseq_cnt = 0
 
-            sequence_paths.append(npz_file)
-            sequence_info.append(seq_info)
-        elif self.split_by in ['sequence', 'subject', 'dataset']:
-            # collect directories of sub-datasets to use
-            dataset_dirs = []
-            if self.split_by == 'dataset':
-                amass_root = self.data_roots[0]
-                split_datasets = TRAIN_DATASETS
-                if self.split == 'val':
-                    split_datasets = VAL_DATASETS
-                elif self.split == 'test':
-                    split_datasets = TEST_DATASETS
-                elif self.split == 'custom':
-                    split_datasets = self.custom_split
-                dataset_dirs = [os.path.join(amass_root, dataset_name) for dataset_name in split_datasets]
-                dataset_dirs = [f for f in dataset_dirs if os.path.exists(f)]
-                print('Found the following datasets for this split:')
-                print(dataset_dirs)
-            elif self.split_by == 'subject':
-                # expand any regex
-                for dataset_dir in self.data_roots:
-                    cur_list = glob.glob(dataset_dir)
-                    dataset_dirs += cur_list
-        
-            dataset_dirs = sorted(dataset_dirs)
+        data_root = self.data_roots[0]
 
-            # print(dataset_dirs)
+        seq_id = 0
+        # iterate through all pairs in the GIMO dataset
+        for scene in os.listdir(data_root):
+            scene_dir = os.path.join(data_root, scene)
+            if not os.path.isdir(scene_dir): continue
+            assert scene in ALL_SCENES
 
-            # collect directories of subjects to use for this split
-            subject_dirs = []
-            if self.split_by in ['dataset', 'subject']:
-                for data_dir in dataset_dirs:
-                    # get all subjects
-                    all_subject_dirs = [os.path.join(data_dir, f) for f in sorted(os.listdir(data_dir)) if f[0] != '.']
-                    all_subject_dirs = [f for f in all_subject_dirs if os.path.isdir(f)]
-                    if self.split_by == 'dataset':
-                        # use all of them
-                        subject_dirs += all_subject_dirs
-                    elif self.split_by == 'subject':
-                        if self.splits_path is not None:
-                            Logger.log('Note: Using specified subject splits rather than manually splitting!')
-                            # load the desired split
-                            split_subject_dirs = None
-                            with open(os.path.join(self.splits_path, self.split + '.txt'), 'r') as f:
-                                split_subject_dirs = f.readlines()
-                                split_subject_dirs = [f.replace('\n', '') for f in split_subject_dirs]
-                            split_subject_dirs = [os.path.join(data_dir, f) for f in split_subject_dirs]
-                            # make sure we actually have these subjects
-                            valid_subj = [subj_dir in all_subject_dirs for subj_dir in split_subject_dirs]
-                            if False in valid_subj:
-                                print('Could not find the some specified split data!')
-                                exit()
-                        else:
-                            # only use the current split fraction
-                            num_subj = len(all_subject_dirs)
-                            train_end_idx = int(self.train_frac*num_subj)
-                            val_end_idx = train_end_idx + int(self.val_frac*num_subj)
-                            split_subject_dirs = all_subject_dirs[:train_end_idx]
-                            if self.split == 'val':
-                                split_subject_dirs = all_subject_dirs[train_end_idx:val_end_idx]
-                            elif self.split == 'test':
-                                split_subject_dirs = all_subject_dirs[val_end_idx:]
-                        
-                        subject_dirs += split_subject_dirs
-            elif self.split_by == 'sequence':
-                # expand any regex
-                for subject_dir in self.data_roots:
-                    cur_list = glob.glob(subject_dir)
-                    subject_dirs += cur_list
+            for seq in os.listdir(scene_dir):
+                if seq == "scene_obj": continue
 
-            subject_dirs = sorted(subject_dirs)
+                npz_path = glob.glob(os.path.join(data_root, scene, seq, "*.npz"))
+                assert len(npz_path) == 1, "more than one .npz files found at {} {}".format(scene, seq)
+                sequence_paths.append(npz_path[0])
 
-            # print(subject_dirs)
+                gimo_smplx_dir = os.path.join(self.gimo_orig_root, scene, seq, "smplx_local")
+                all_human_obj = os.listdir(gimo_smplx_dir)
+                all_steps = sorted([int(obj.split(".")[0]) for obj in all_human_obj if (obj.split(".")[0].isdigit() and obj.split('.')[-1] == "obj")])
 
-            # collect directories of sequences to use for this split
-            for cur_subj_dir in subject_dirs:
-                all_seq_files = sorted(glob.glob(os.path.join(cur_subj_dir, '*.npz')))
-                split_seq_files = all_seq_files
-                if self.split_by == 'sequence':
-                    if self.splits_path is not None:
-                        Logger.log('Note: Using specified sequence splits rather than manually splitting!')
-                        # load the desired split
-                        split_seq_files = None
-                        with open(os.path.join(self.splits_path, self.split + '.txt'), 'r') as f:
-                            split_seq_files = f.readlines()
-                            split_seq_files = [f.replace('\n', '') for f in split_seq_files]
-                        split_seq_files = [os.path.join(cur_subj_dir, f) for f in split_seq_files]
-                        print(split_seq_files)
-                        # make sure we actually have these sequences
-                        valid_seq = [seq_dir in all_seq_files for seq_dir in split_seq_files]
-                        if False in valid_seq:
-                            print('Could not find the some specified split data!')
-                            exit()
-                    else:
-                        # only take split fracion
-                        num_seqs = len(all_seq_files)
-                        train_end_idx = int(self.train_frac*num_seqs)
-                        val_end_idx = train_end_idx + int(self.val_frac*num_seqs)
-                        split_seq_files = all_seq_files[:train_end_idx]
-                        if self.split == 'val':
-                            split_seq_files = all_seq_files[train_end_idx:val_end_idx]
-                        elif self.split == 'test':
-                            split_seq_files = all_seq_files[val_end_idx:]
-
-                # get seq info
-                split_seq_info = [self.parse_sequence_info(f) for f in split_seq_files]
-                split_seq_dur = np.array([info[1] for info in split_seq_info])
-                split_seq_files = np.array(split_seq_files)
-                split_seq_info = np.array(split_seq_info)
-
-                # throw away any sequences < desired number of sampled frames
-                split_seq_files = split_seq_files[split_seq_dur >= self.effective_seq_len]
-                split_seq_info = split_seq_info[split_seq_dur >= self.effective_seq_len]
-
-                sequence_paths += split_seq_files.tolist()
-                sequence_info += split_seq_info.tolist()
-
-
-        # chop into subsequences and build dict (need for using deterministic subsequences rather than random sampling the start)
-        #   and determining "length" of the dataset
-        subseq_map = dict() # map data_idx -> (sequence_path_idx, start_frame, end_frame)
-        data_idx = 0
-        for seq_idx, seq_info in enumerate(sequence_info):
-            seq_dur, seq_nframes, seq_fps = seq_info
-            sample_nframes = self.effective_seq_len # need num_frames with an input (past) and output (future) so must add 1
-            start_frame_idx = 0
-            end_frame_idx = sample_nframes
-            while end_frame_idx <= seq_nframes:
-                subseq_map[data_idx] = (seq_idx, start_frame_idx, end_frame_idx)
-                start_frame_idx += (self.sample_num_frames) # some test sequences may overlap slightly (future outputs from one sequences may appear as inputs in another sequence)
-                end_frame_idx += (self.sample_num_frames)
-                if self.step_frames_out > 0:
-                    start_frame_idx += 1
-                    end_frame_idx += 1
-                data_idx += 1
+                # velocities start from index 2
+                for t in range(2, len(all_steps) - 1):
+                    subseq_map[subseq_cnt] = (seq_id, all_steps[t], all_steps[t+1])
+                    subseq_cnt += 1
+                seq_id += 1
 
         return sequence_paths, sequence_info, subseq_map
-
 
     def __len__(self):
         return self.data_len
@@ -293,21 +171,14 @@ class AmassDiscreteDataset(Dataset):
         seq_file_path = None
         sample_frame_inds = None
         sample_nframes = self.effective_seq_len # need num_frames with an input (past) and output (future) and future may be at large step size
-        if self.split == 'train' and not self.deterministic_train:
-            # randomly choose sequence weighted by duration (if not split by subject or dataset)
-            seq_idx = np.random.choice(self.num_seq, size=1, replace=False, p=None)[0]
-            seq_file_path = self.sequence_paths[seq_idx]
-            # randomly choose a subsequence window and randomly subsample frames from this
-            _, seq_nframes, _ = self.sequence_info[seq_idx]
-            start_idx = np.random.randint(seq_nframes - sample_nframes + 1)
-            end_idx = start_idx + sample_nframes
-            sample_frame_inds = np.arange(start_idx, end_idx)
-        else:
-            # want to choose deterministically
-            # index into prepared subsequences
-            seq_idx, start_frame_idx, end_frame_idx = self.subseq_map[idx]
-            seq_file_path = self.sequence_paths[seq_idx]
-            sample_frame_inds = np.arange(start_frame_idx, end_frame_idx)
+
+        # want to choose deterministically
+        # index into prepared subsequences
+        seq_idx, start_frame_idx, end_frame_idx = self.subseq_map[idx]
+        seq_file_path = self.sequence_paths[seq_idx]
+        sample_frame_inds = np.array([start_frame_idx, end_frame_idx])
+        velocity_frame_inds = sample_frame_inds - 2
+        #sample_frame_inds = start_frame_idx
 
         # read in npz file (only read in what we need based on flags)
         data = np.load(seq_file_path)
@@ -316,23 +187,24 @@ class AmassDiscreteDataset(Dataset):
 
         # smpl
         world2aligned_rot = data['world2aligned_rot'][sample_frame_inds]
+        #world2aligned_rot = np.eye(3)[None, :]
         betas = np.repeat(data['betas'][np.newaxis], self.sample_num_frames, axis=0)
         trans = data['trans'][sample_frame_inds]
         root_orient = data['root_orient'][sample_frame_inds]
         pose_body = data['pose_body'][sample_frame_inds]
 
-        trans_vel = data['trans_vel'][sample_frame_inds]
-        root_orient_vel = data['root_orient_vel'][sample_frame_inds]
-        pose_body_vel = data['pose_body_vel'][sample_frame_inds]
+        trans_vel = data['trans_vel'][velocity_frame_inds]
+        root_orient_vel = data['root_orient_vel'][velocity_frame_inds]
+        pose_body_vel = data['pose_body_vel'][velocity_frame_inds]
 
         # Joints
         joints = data['joints'][sample_frame_inds]
         verts = data['mojo_verts'][sample_frame_inds]
         num_verts = verts.shape[1]
 
-        joints_vel = data['joints_vel'][sample_frame_inds]
-        verts_vel = data['mojo_verts_vel'][sample_frame_inds]
-        joints_orient_vel = data['joint_orient_vel_seq'][sample_frame_inds]
+        joints_vel = data['joints_vel'][velocity_frame_inds]
+        verts_vel = data['mojo_verts_vel'][velocity_frame_inds]
+        joints_orient_vel = data['joint_orient_vel_seq'][velocity_frame_inds]
 
         contacts = data['contacts'][sample_frame_inds]
         contacts = contacts[:, CONTACT_INDS] # only need certain joints
@@ -341,7 +213,10 @@ class AmassDiscreteDataset(Dataset):
         meta = {'fps' : fps,
                 'path' : '/'.join(seq_file_path.split('/')[-3:]),
                 'gender' : gender,
-                'betas' : torch.Tensor(betas)
+                'betas' : torch.Tensor(betas),
+                'scene' : seq_file_path.split('/')[4],
+                'seq' : seq_file_path.split('/')[5],
+                'start_idx': start_frame_idx,
         }
 
         pose_body_mat = batch_rodrigues(torch.Tensor(pose_body).reshape(-1, 3)).numpy().reshape((sample_nframes, NUM_BODY_JOINTS*9)) # T x 21 x 9
@@ -354,12 +229,17 @@ class AmassDiscreteDataset(Dataset):
             global_world2aligned_trans = np.zeros((1, 3))
             trans2joint = np.zeros((1, 1, 3))
             global_world2aligned_rot = world2aligned_rot[0]
+            #global_world2aligned_rot = world2aligned_rot
             global_world2aligned_trans[0, :2] = -trans[0, :2]
             trans2joint[0, 0, :2] = -(joints[0:1, 0, :] + global_world2aligned_trans)[0, :2]
 
-            sidx_glob = 0 if self.only_global else 1 # return full vs only outputs
-            glob_num_frames = (self.sample_num_frames + 1) if self.only_global else self.sample_num_frames
-            eidx_glob = self.sample_num_frames + 1
+            #sidx_glob = 0 if self.only_global else 1 # return full vs only outputs
+            sidx_glob = 0
+            #glob_num_frames = (self.sample_num_frames + 1) if self.only_global else self.sample_num_frames
+            glob_num_frames = self.sample_num_frames
+            #glob_num_frames = 1
+            #eidx_glob = self.sample_num_frames + 1
+            eidx_glob = self.sample_num_frames
             if self.return_cfg['root_orient']:
                 # root orient
                 global_root_orient = np.matmul(global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
@@ -422,15 +302,17 @@ class AmassDiscreteDataset(Dataset):
                 for k, v in global_data_dict.items():
                     data_out[k] = torch.Tensor(v)
                 # add one to beta
-                meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
+                meta['betas'] = torch.zeros((glob_num_frames, 10))
+                #meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
                 return data_out, meta
 
         # set up transformation to canonical frame for all input sequences
         world2aligned_trans = np.zeros((self.sample_num_frames, 3))
         trans2joint = np.zeros((1, 1, 3))
         # align using smpl translation and root orientation
-        world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
-        world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
+        world2aligned_rot = np.eye(3)[None, ...].repeat(self.sample_num_frames, axis=0)
+        #world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
+        #world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
         # offset between the translation origin and the root joint (depends on body shape beta)
         trans2joint[0, 0, :2] = -(joints[0, 0, :] + world2aligned_trans[0])[:2]
 
@@ -456,7 +338,8 @@ class AmassDiscreteDataset(Dataset):
 
         # build concated in/out array T x num_in+num_out x D for each data
         # slice_size = self.step_frames_in + self.step_frames_out
-        slice_size = self.step_frames_in + 1 + (self.step_frames_out-1)*self.frames_out_step_size
+        #slice_size = self.step_frames_in + 1 + (self.step_frames_out-1)*self.frames_out_step_size
+        slice_size = self.step_frames_in
         all_data_dict = dict()
 
         # relative body joint angles
@@ -652,9 +535,6 @@ class AmassDiscreteDataset(Dataset):
                 cur_in = v[0]
                 cur_out = v[1]
 
-                if self.noise_std > 0.0 and self.split == 'train':
-                    cur_in += np.random.normal(loc=0.0, scale=self.noise_std, size=cur_in.shape)
-                    
                 data_in[k] = torch.Tensor(cur_in)
                 data_out[k] = torch.Tensor(cur_out)
 
@@ -662,6 +542,11 @@ class AmassDiscreteDataset(Dataset):
             for k, v in global_data_dict.items():
                 data_out[k] = torch.Tensor(v)
 
+        data_in["seq_file_path"] = seq_file_path
+        data_in["start_frame_idx"] = start_frame_idx
+        data_in["end_frame_idx"] = end_frame_idx
+
+        meta["betas"] = torch.zeros(1, 10)
         return data_in, data_out, meta
 
 if __name__=='__main__':

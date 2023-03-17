@@ -254,15 +254,17 @@ class GimoDiscreteDataset(Dataset):
             # collect all outputs transformed to the frame of the initial input
             global_world2aligned_trans = np.zeros((1, 3))
             trans2joint = np.zeros((1, 1, 3))
-            global_world2aligned_rot = world2aligned_rot[0]
+            #global_world2aligned_rot = world2aligned_rot[0]
+            global_world2aligned_rot = world2aligned_rot
             global_world2aligned_trans[0, :2] = -trans[0, :2]
             trans2joint[0, 0, :2] = -(joints[0:1, 0, :] + global_world2aligned_trans)[0, :2]
 
             #sidx_glob = 0 if self.only_global else 1 # return full vs only outputs
             sidx_glob = 0
-            glob_num_frames = (self.sample_num_frames + 1) if self.only_global else self.sample_num_frames
-            #eidx_glob = self.sample_num_frames + 1
-            eidx_glob = self.sample_num_frames
+            #glob_num_frames = (self.sample_num_frames + 1) if self.only_global else self.sample_num_frames
+            glob_num_frames = 1
+            eidx_glob = self.sample_num_frames + 1
+            #eidx_glob = self.sample_num_frames
             if self.return_cfg['root_orient']:
                 # root orient
                 global_root_orient = np.matmul(global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
@@ -325,7 +327,8 @@ class GimoDiscreteDataset(Dataset):
                 for k, v in global_data_dict.items():
                     data_out[k] = torch.Tensor(v)
                 # add one to beta
-                meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
+                meta['betas'] = torch.zeros((glob_num_frames, 10))
+                #meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
                 return data_out, meta
 
         # set up transformation to canonical frame for all input sequences

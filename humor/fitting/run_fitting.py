@@ -13,6 +13,9 @@ sys.path.append(os.path.join(cur_file_path, '..'))
 import importlib, time, math, shutil, json
 import traceback
 
+import pickle
+from collections import defaultdict
+
 import numpy as np
 
 import torch
@@ -22,6 +25,7 @@ from utils.logging import Logger, cp_files
 from models.humor_model import HumorModel
 from datasets.amass_discrete_dataset import AmassDiscreteDataset
 from datasets.amass_fit_dataset import AMASSFitDataset
+from datasets.gimo_fit_dataset import GIMOFitDataset
 from datasets.prox_dataset import ProxDataset
 from datasets.imapper_dataset import iMapperDataset
 from datasets.rgb_dataset import RGBVideoDataset
@@ -68,6 +72,21 @@ def main(args, config_file):
     rgb_vid_name = None
     if args.data_type == 'AMASS':
         dataset = AMASSFitDataset(args.data_path,
+                                  seq_len=args.amass_seq_len,
+                                  return_joints=args.amass_use_joints,
+                                  return_verts=args.amass_use_verts,
+                                  return_points=args.amass_use_points,
+                                  noise_std=args.amass_noise_std,
+                                  make_partial=args.amass_make_partial,
+                                  partial_height=args.amass_partial_height,
+                                  drop_middle=args.amass_drop_middle,
+                                  root_only=args.amass_root_joint_only,
+                                  split_by=args.amass_split_by,
+                                  custom_split=args.amass_custom_split)
+        data_fps = 30
+    if args.data_type == 'GIMO':
+        dataset = GIMOFitDataset(args.data_path,
+                                  splits_path=args.splits_path,
                                   seq_len=args.amass_seq_len,
                                   return_joints=args.amass_use_joints,
                                   return_verts=args.amass_use_verts,
@@ -192,6 +211,7 @@ def main(args, config_file):
     else:
         raise NotImplementedError('Fitting for arbitrary RGB-D videos is not yet implemented')
 
+    dataset[0]
     data_loader = DataLoader(dataset, 
                             batch_size=B,
                             shuffle=args.shuffle,
@@ -262,6 +282,8 @@ def main(args, config_file):
 
     if args.data_type == 'RGB' and args.save_results:
         all_res_out_paths = []
+
+    all_motion_latents = defaultdict(dict)
 
     fit_errs = dict()
     prev_batch_overlap_res_dict = None
@@ -416,11 +438,24 @@ def main(args, config_file):
                                                             fit_gender=fit_gender)
 
             # save final results
-            if cur_res_out_paths is not None:
-                save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
-                                    optim_floor=optimizer.optim_floor,
-                                    obs_img_paths=obs_img_paths,
-                                    obs_mask_paths=obs_mask_paths)
+            for b in range(optim_result['latent_motion'].shape[0]):
+                motion_latent = optim_result['latent_motion'][b].cpu().squeeze(0)
+                scene = gt_data['scene'][b]
+                seq = gt_data['seq'][b]
+                start_idx = int(gt_data['start_idx'][b])
+
+                if not scene in all_motion_latents.keys():
+                    all_motion_latents[scene] = {}
+
+                if not seq in all_motion_latents[scene].keys():
+                    all_motion_latents[scene][seq] = {}
+
+                all_motion_latents[scene][seq][start_idx] = motion_latent
+            # if cur_res_out_paths is not None:
+            #     save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
+            #                         optim_floor=optimizer.optim_floor,
+            #                         obs_img_paths=obs_img_paths,
+            #                         obs_mask_paths=obs_mask_paths)
 
             elapsed_t = time.time() - start_t
             Logger.log('Optimized sequence %d in %f s' % (i, elapsed_t))
@@ -445,12 +480,19 @@ def main(args, config_file):
         del gt_data
         torch.cuda.empty_cache()
 
-    # if RGB video, stitch together subsequences
-    if args.data_type == 'RGB' and args.save_results:
-        Logger.log('Saving final results...')
-        seq_intervals = dataset.seq_intervals
-        save_rgb_stitched_result(seq_intervals, all_res_out_paths, res_out_path, device,
-                                 body_model_path, num_betas, use_joints2d)
+    latent_root = '/scr/bxpan/gaze_dataset'
+    for scene, scene_latents in all_motion_latents.items():
+        for seq, seq_latents in scene_latents.items():
+            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents.pkl")
+            with open(latent_pkl_path, 'wb') as f:
+                pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # # if RGB video, stitch together subsequences
+    # if args.data_type == 'RGB' and args.save_results:
+    #     Logger.log('Saving final results...')
+    #     seq_intervals = dataset.seq_intervals
+    #     save_rgb_stitched_result(seq_intervals, all_res_out_paths, res_out_path, device,
+    #                              body_model_path, num_betas, use_joints2d)
 
 
 if __name__=='__main__':
