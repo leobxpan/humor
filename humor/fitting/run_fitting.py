@@ -150,8 +150,8 @@ def main(args, config_file):
                                                             fps=30,
                                                             img_folder=img_folder,
                                                             return_info=True)
-            print(img_folder)
-            print(img_shape)
+            # print(img_folder)
+            # print(img_shape)
 
             if not use_custom_keypts:
                 # OpenPose on images
