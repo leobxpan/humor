@@ -451,11 +451,11 @@ def main(args, config_file):
                     all_motion_latents[scene][seq] = {}
 
                 all_motion_latents[scene][seq][start_idx] = motion_latent
-            # if cur_res_out_paths is not None:
-            #     save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
-            #                         optim_floor=optimizer.optim_floor,
-            #                         obs_img_paths=obs_img_paths,
-            #                         obs_mask_paths=obs_mask_paths)
+            if cur_res_out_paths is not None:
+                save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
+                                    optim_floor=optimizer.optim_floor,
+                                    obs_img_paths=obs_img_paths,
+                                    obs_mask_paths=obs_mask_paths)
 
             elapsed_t = time.time() - start_t
             Logger.log('Optimized sequence %d in %f s' % (i, elapsed_t))
@@ -480,19 +480,19 @@ def main(args, config_file):
         del gt_data
         torch.cuda.empty_cache()
 
-    latent_root = '/scr/bxpan/gaze_dataset'
-    for scene, scene_latents in all_motion_latents.items():
-        for seq, seq_latents in scene_latents.items():
-            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents.pkl")
-            with open(latent_pkl_path, 'wb') as f:
-                pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # latent_root = '/scr/bxpan/gaze_dataset'
+    # for scene, scene_latents in all_motion_latents.items():
+    #     for seq, seq_latents in scene_latents.items():
+    #         latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents.pkl")
+    #         with open(latent_pkl_path, 'wb') as f:
+    #             pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # # if RGB video, stitch together subsequences
-    # if args.data_type == 'RGB' and args.save_results:
-    #     Logger.log('Saving final results...')
-    #     seq_intervals = dataset.seq_intervals
-    #     save_rgb_stitched_result(seq_intervals, all_res_out_paths, res_out_path, device,
-    #                              body_model_path, num_betas, use_joints2d)
+    # if RGB video, stitch together subsequences
+    if args.data_type == 'RGB' and args.save_results:
+        Logger.log('Saving final results...')
+        seq_intervals = dataset.seq_intervals
+        save_rgb_stitched_result(seq_intervals, all_res_out_paths, res_out_path, device,
+                                 body_model_path, num_betas, use_joints2d)
 
 
 if __name__=='__main__':

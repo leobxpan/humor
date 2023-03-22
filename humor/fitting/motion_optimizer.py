@@ -918,7 +918,7 @@ class MotionOptimizer():
             smpl_results, _ = self.smpl_results(trans, root_orient, body_pose, betas)
             joints = smpl_results['joints3d']
             # update to correct rotations for input
-            root_orient_in = root_orient 
+            root_orient_in = root_orient
             body_pose_in = body_pose
             if self.motion_prior.in_rot_rep == 'mat' or self.motion_prior.in_rot_rep == '6d':
                 root_orient_in = batch_rodrigues(root_orient.reshape(-1, 3)).reshape((B, 1, 9))

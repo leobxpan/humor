@@ -24,6 +24,8 @@ from body_model.utils import SMPL_JOINTS, KEYPT_VERTS
 
 from viz.utils import viz_smpl_seq, create_video
 
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
 J_BODY = len(SMPL_JOINTS)-1 # no root
 
 GT_RES_NAME = 'gt_results'
