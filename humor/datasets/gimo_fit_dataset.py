@@ -9,7 +9,7 @@ import torch
 from datasets.amass_utils import CONTACT_INDS
 from utils.transforms import rotation_matrix_to_angle_axis
 from body_model.body_model import BodyModel
-from datasets.gimo_discrete_inout_dataset import GimoDiscreteInOutDataset
+from datasets.gimo_subseq_discrete_dataset import GimoSubSeqDiscreteDataset
 from body_model.utils import SMPLH_PATH, SMPL_JOINTS
 from fitting.fitting_utils import resize_points
 
@@ -46,7 +46,7 @@ class GIMOFitDataset(Dataset):
         split_str = 'test'
         if split_by == 'dataset' and custom_split is not None:
             split_str = 'custom'
-        self.gimo_dataset = GimoDiscreteInOutDataset(split=split_str,
+        self.gimo_dataset = GimoSubSeqDiscreteDataset(split=split_str,
                                                 data_paths=[data_path],
                                                 splits_path=splits_path,
                                                 sample_num_frames=seq_len, # global seq returns + 1
@@ -86,6 +86,7 @@ class GIMOFitDataset(Dataset):
         gt_dict['scene'] = meta['scene']
         gt_dict['seq'] = meta['seq']
         gt_dict['start_idx'] = meta['start_idx']
+        gt_dict['end_idx'] = meta['end_idx']
 
         # create clean observations
         observed_dict = dict()

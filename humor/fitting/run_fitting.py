@@ -480,12 +480,12 @@ def main(args, config_file):
         del gt_data
         torch.cuda.empty_cache()
 
-    # latent_root = '/scr/bxpan/gaze_dataset'
-    # for scene, scene_latents in all_motion_latents.items():
-    #     for seq, seq_latents in scene_latents.items():
-    #         latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents.pkl")
-    #         with open(latent_pkl_path, 'wb') as f:
-    #             pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
+    latent_root = '/scr/bxpan/gaze_dataset'
+    for scene, scene_latents in all_motion_latents.items():
+        for seq, seq_latents in scene_latents.items():
+            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq.pkl")
+            with open(latent_pkl_path, 'wb') as f:
+                pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # if RGB video, stitch together subsequences
     if args.data_type == 'RGB' and args.save_results:
