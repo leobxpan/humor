@@ -215,7 +215,7 @@ class GimoSubSeqDiscreteDataset(Dataset):
         # adjust the edge indices to be between 1 and seq_len - 1
         seq_len = data["trans"].shape[0]
         sample_frame_inds[0] = sample_frame_inds[0] if start_frame_idx > 0 else 1
-        sample_frame_inds[-1] = sample_frame_inds[-1] if end_frame_idx < seq_len else end_frame_idx - 2 
+        #sample_frame_inds[-1] = sample_frame_inds[-1] if end_frame_idx < seq_len else end_frame_idx - 2 
 
         # smpl
         # throw away edge frames

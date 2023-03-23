@@ -55,7 +55,8 @@ def main(cfg):
     train_dict = defaultdict(list)
     test_dict = defaultdict(list)
 
-    load_dir = os.path.join("humor/rollout_humor_scripts", "all_scenes_stride_{}_hist_{}_future_{}".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len']))
+    #load_dir = os.path.join("humor/rollout_humor_scripts", "all_scenes_stride_{}_hist_{}_future_{}".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len']))
+    load_dir = os.path.join("humor/rollout_humor_scripts", "all_scenes_stride_1_hist_1_future_60_latents")
 
     train_poses = np.load(os.path.join(load_dir, "train_poses.npy"))
     train_seqs = np.load(os.path.join(load_dir, "train_seqs.npy"))
@@ -104,11 +105,11 @@ def main(cfg):
         scene_seq_id = scene + "_" + seq
         test_dict[scene_seq_id].append(predict_inds)
 
-    # with open(os.path.join(load_dir, "train_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
-    #     pickle.dump(train_dict, f)
+    with open(os.path.join(load_dir, "train_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
+        pickle.dump(train_dict, f)
 
-    # with open(os.path.join(load_dir, "test_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
-    #     pickle.dump(test_dict, f)
+    with open(os.path.join(load_dir, "test_predict_dict.pkl".format(cfg['data']['stride'], cfg['data']['input_seq_len'], cfg['data']['output_seq_len'])), "wb") as f:
+        pickle.dump(test_dict, f)
 
 if __name__ == '__main__':
     torch.manual_seed(0)
