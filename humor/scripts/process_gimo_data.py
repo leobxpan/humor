@@ -492,7 +492,8 @@ def process_seq(data_paths):
             joint_orient_vel_seq = joint_orient_vel_seq[:,2]
             # exit()
 
-        # NOT throwing out edge frames for other data so velocities are accurate to be consistent with GIMO indexing
+        # throwing out edge frames for other data so velocities are accurate to be consistent with GIMO indexing
+        # commenting out the following AND indexing on L222-230 of gimo_subseq_discrete_dataset.py
         # num_frames = num_frames - 2
         # contacts = contacts[1:-1]
         # trans = trans[1:-1]
