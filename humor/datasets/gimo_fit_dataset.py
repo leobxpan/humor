@@ -43,7 +43,8 @@ class GIMOFitDataset(Dataset):
         self.partial_height = partial_height
         self.drop_middle = drop_middle
         self.root_only = root_only
-        split_str = 'train'
+        #split_str = 'train'
+        split_str = 'test'
         # if split_by == 'dataset' and custom_split is not None:
         #     split_str = 'custom'
         self.gimo_dataset = GimoSubSeqDiscreteDataset(split=split_str,

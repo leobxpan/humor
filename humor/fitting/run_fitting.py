@@ -483,7 +483,8 @@ def main(args, config_file):
     latent_root = '/scr/bxpan/gaze_dataset'
     for scene, scene_latents in all_motion_latents.items():
         for seq, seq_latents in scene_latents.items():
-            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq.pkl")
+            #latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq.pkl")
+            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq_test.pkl")
             with open(latent_pkl_path, 'wb') as f:
                 pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
 
