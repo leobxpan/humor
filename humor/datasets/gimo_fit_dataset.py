@@ -20,6 +20,7 @@ class GIMOFitDataset(Dataset):
 
     def __init__(self, data_path,
                        splits_path=None,
+                       split='train',
                        seq_len=60,
                        return_joints=True,
                        return_verts=True,
@@ -43,8 +44,7 @@ class GIMOFitDataset(Dataset):
         self.partial_height = partial_height
         self.drop_middle = drop_middle
         self.root_only = root_only
-        #split_str = 'train'
-        split_str = 'test'
+        split_str = split
         # if split_by == 'dataset' and custom_split is not None:
         #     split_str = 'custom'
         self.gimo_dataset = GimoSubSeqDiscreteDataset(split=split_str,

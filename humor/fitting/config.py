@@ -8,6 +8,7 @@ def parse_args(argv):
     # Observed data options
     parser.add_argument('--data-path', type=str, required=True, help='Path to the data to fit.')
     parser.add_argument('--splits-path', type=str, default=None, help='Path to data splits to use.')
+    parser.add_argument('--split', type=str, default='train', help='Train / test split.')
     parser.add_argument('--orig-data-root', default="/scr/bxpan/gaze_dataset", type=str)
 
     parser.add_argument('--data-type', type=str, required=True, choices=['AMASS', 'GIMO', 'PROX-RGB', 'PROX-RGBD', 'iMapper-RGB', 'RGB'], help='The type of data we are fitting to.')

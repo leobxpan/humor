@@ -87,6 +87,7 @@ def main(args, config_file):
     if args.data_type == 'GIMO':
         dataset = GIMOFitDataset(args.data_path,
                                   splits_path=args.splits_path,
+                                  split=args.split,
                                   seq_len=args.amass_seq_len,
                                   return_joints=args.amass_use_joints,
                                   return_verts=args.amass_use_verts,
@@ -283,7 +284,8 @@ def main(args, config_file):
     if args.data_type == 'RGB' and args.save_results:
         all_res_out_paths = []
 
-    all_motion_latents = defaultdict(dict)
+    # all_motion_latents = defaultdict(dict)
+    all_optim_res = defaultdict(dict)
 
     fit_errs = dict()
     prev_batch_overlap_res_dict = None
@@ -439,18 +441,19 @@ def main(args, config_file):
 
             # save final results
             for b in range(optim_result['latent_motion'].shape[0]):
-                motion_latent = optim_result['latent_motion'][b].cpu().squeeze(0)
+                optim_res = {k: optim_result[k][b].cpu().squeeze(0) for k in optim_result.keys()}
+                # motion_latent = optim_result['latent_motion'][b].cpu().squeeze(0)
                 scene = gt_data['scene'][b]
                 seq = gt_data['seq'][b]
                 start_idx = int(gt_data['start_idx'][b])
 
-                if not scene in all_motion_latents.keys():
-                    all_motion_latents[scene] = {}
+                if not scene in all_optim_res.keys():
+                    all_optim_res[scene] = {}
 
-                if not seq in all_motion_latents[scene].keys():
-                    all_motion_latents[scene][seq] = {}
+                if not seq in all_optim_res[scene].keys():
+                    all_optim_res[scene][seq] = {}
 
-                all_motion_latents[scene][seq][start_idx] = motion_latent
+                all_optim_res[scene][seq][start_idx] = optim_res
             if cur_res_out_paths is not None:
                 save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
                                     optim_floor=optimizer.optim_floor,
@@ -481,12 +484,11 @@ def main(args, config_file):
         torch.cuda.empty_cache()
 
     latent_root = '/scr/bxpan/gaze_dataset'
-    for scene, scene_latents in all_motion_latents.items():
-        for seq, seq_latents in scene_latents.items():
-            #latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq.pkl")
-            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_motion_latents_60_seq_test.pkl")
+    for scene, scene_res in all_optim_res.items():
+        for seq, seq_res in scene_res.items():
+            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_optim_res_60_seq_%s.pkl"%args.split)
             with open(latent_pkl_path, 'wb') as f:
-                pickle.dump(seq_latents, f, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(seq_res, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # if RGB video, stitch together subsequences
     if args.data_type == 'RGB' and args.save_results:
