@@ -71,7 +71,7 @@ class GIMOFitDataset(Dataset):
 
     def __getitem__(self, idx):
         global_data, meta = self.gimo_dataset.__getitem__(idx)
-       
+
         # create the ground truth data dictionary
         gt_dict = dict()
         for k, v in global_data.items():
@@ -88,6 +88,9 @@ class GIMOFitDataset(Dataset):
         gt_dict['seq'] = meta['seq']
         gt_dict['start_idx'] = meta['start_idx']
         gt_dict['end_idx'] = meta['end_idx']
+        gt_dict['world2aligned_rot'] = meta['global_world2aligned_rot']
+        gt_dict['world2aligned_trans'] = meta['global_world2aligned_trans']
+        gt_dict['trans2joint'] = meta['trans2joint']
 
         # create clean observations
         observed_dict = dict()

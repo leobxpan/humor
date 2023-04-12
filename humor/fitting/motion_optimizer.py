@@ -619,7 +619,8 @@ class MotionOptimizer():
                                                                             self.betas,
                                                                             prior_opt_params,
                                                                             self.latent_motion,
-                                                                            fit_gender=fit_gender)
+                                                                            fit_gender=fit_gender,
+                                                                            return_vel=True)
         body_pose = rollout_results['pose_body']
         self.latent_pose = self.pose2latent(body_pose)
         self.trans = cam_rollout_results['trans']
@@ -645,6 +646,10 @@ class MotionOptimizer():
         final_optim_res = self.get_optim_result(body_pose)
         if rollout_results is not None and 'contacts' in rollout_results:
             final_optim_res['contacts'] = rollout_results['contacts']
+        if "trans_vel" in rollout_results:
+            final_optim_res['trans_vel'] = rollout_results['trans_vel']
+            final_optim_res['root_orient_vel'] = rollout_results['root_orient_vel']
+            final_optim_res['joints_vel'] = rollout_results['joints_vel']
         
         if self.optim_floor: 
             # go back and also save results from stage 2 using the final optimized floor to transform to prior frame

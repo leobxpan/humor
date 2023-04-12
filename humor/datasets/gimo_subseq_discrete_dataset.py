@@ -274,8 +274,7 @@ class GimoSubSeqDiscreteDataset(Dataset):
             # collect all outputs transformed to the frame of the initial input
             global_world2aligned_trans = np.zeros((1, 3))
             trans2joint = np.zeros((1, 1, 3))
-            #global_world2aligned_rot = world2aligned_rot[0]
-            global_world2aligned_rot = world2aligned_rot
+            global_world2aligned_rot = world2aligned_rot[0]
             global_world2aligned_trans[0, :2] = -trans[0, :2]
             trans2joint[0, 0, :2] = -(joints[0:1, 0, :] + global_world2aligned_trans)[0, :2]
 
@@ -286,23 +285,23 @@ class GimoSubSeqDiscreteDataset(Dataset):
             eidx_glob = self.sample_num_frames
             if self.return_cfg['root_orient']:
                 # root orient
-                #global_root_orient = np.matmul(global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
-                global_root_orient = np.einsum('bij, bjk -> bik', global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
+                global_root_orient = np.matmul(global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
+                #global_root_orient = np.einsum('bij, bjk -> bik', global_world2aligned_rot, root_orient_mat[sidx_glob:eidx_glob].copy()).reshape((glob_num_frames, 9))
                 # print(global_root_orient.shape)
                 global_data_dict['global_root_orient'] = global_root_orient
             if self.return_cfg['trans']:
                 # trans
                 global_trans = trans[sidx_glob:eidx_glob].copy() + global_world2aligned_trans
-                global_trans = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_trans)
-                #global_trans = np.matmul(global_world2aligned_rot, global_trans.T).T
+                #global_trans = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_trans)
+                global_trans = np.matmul(global_world2aligned_rot, global_trans.T).T
                 # print(global_trans.shape)
                 global_data_dict['global_trans'] = global_trans
             if self.return_cfg['joints']:
                 # joints
                 global_joints = joints[sidx_glob:eidx_glob].copy() + global_world2aligned_trans.reshape((1,1,3))
                 global_joints += trans2joint
-                global_joints = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_joints)      #TODO: not 100% sure if this is correct
-                #global_joints = np.matmul(global_world2aligned_rot, global_joints.reshape((-1, 3)).T).T.reshape((glob_num_frames, len(SMPL_JOINTS), 3))
+                #global_joints = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_joints)      #TODO: not 100% sure if this is correct
+                global_joints = np.matmul(global_world2aligned_rot, global_joints.reshape((-1, 3)).T).T.reshape((glob_num_frames, len(SMPL_JOINTS), 3))
                 global_joints -= trans2joint
                 # print(global_joints.shape)
                 global_data_dict['global_joints'] = global_joints
@@ -310,33 +309,33 @@ class GimoSubSeqDiscreteDataset(Dataset):
                 # verts
                 global_verts = verts[sidx_glob:eidx_glob].copy() + global_world2aligned_trans.reshape((1,1,3))
                 global_verts += trans2joint
-                global_verts = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_verts)
-                #global_verts = np.matmul(global_world2aligned_rot, global_verts.reshape((-1, 3)).T).T.reshape((glob_num_frames, num_verts, 3))
+                #global_verts = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_verts)
+                global_verts = np.matmul(global_world2aligned_rot, global_verts.reshape((-1, 3)).T).T.reshape((glob_num_frames, num_verts, 3))
                 global_verts -= trans2joint
                 # print(global_verts.shape)
                 global_data_dict['global_verts'] = global_verts
             if self.return_cfg['trans_vel']:
                 global_trans_vel = trans_vel[sidx_glob:eidx_glob].copy()
-                global_trans_vel = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_trans_vel)
-                #global_trans_vel = np.matmul(global_world2aligned_rot, global_trans_vel.T).T
+                #global_trans_vel = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_trans_vel)
+                global_trans_vel = np.matmul(global_world2aligned_rot, global_trans_vel.T).T
                 global_data_dict['global_trans_vel'] = global_trans_vel
             if self.return_cfg['root_orient_vel']:
                 global_root_orient_vel = root_orient_vel[sidx_glob:eidx_glob].copy()
-                global_root_orient_vel = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_root_orient_vel)
-                #global_root_orient_vel = np.matmul(global_world2aligned_rot, global_root_orient_vel.T).T
+                #global_root_orient_vel = np.einsum('bij, bj -> bi', global_world2aligned_rot, global_root_orient_vel)
+                global_root_orient_vel = np.matmul(global_world2aligned_rot, global_root_orient_vel.T).T
                 global_data_dict['global_root_orient_vel'] = global_root_orient_vel
             if self.return_cfg['joints_vel']:
                 # joints vel
                 global_joints_vel = joints_vel[sidx_glob:eidx_glob].copy()
-                global_joints_vel = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_joints_vel)
-                #global_joints_vel = np.matmul(global_world2aligned_rot, global_joints_vel.reshape((-1, 3)).T).T.reshape((glob_num_frames, len(SMPL_JOINTS), 3))
+                #global_joints_vel = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_joints_vel)
+                global_joints_vel = np.matmul(global_world2aligned_rot, global_joints_vel.reshape((-1, 3)).T).T.reshape((glob_num_frames, len(SMPL_JOINTS), 3))
                 # print(global_joints_vel.shape)
                 global_data_dict['global_joints_vel'] = global_joints_vel
             if self.return_cfg['verts_vel']:
                 # verts vel
                 global_verts_vel = verts_vel[sidx_glob:eidx_glob].copy()
-                global_verts_vel = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_verts_vel)
-                #global_verts_vel = np.matmul(global_world2aligned_rot, global_verts_vel.reshape((-1, 3)).T).T.reshape((glob_num_frames, num_verts, 3))
+                #global_verts_vel = np.einsum('bij, bnj -> bni', global_world2aligned_rot, global_verts_vel)
+                global_verts_vel = np.matmul(global_world2aligned_rot, global_verts_vel.reshape((-1, 3)).T).T.reshape((glob_num_frames, num_verts, 3))
                 # print(global_verts_vel.shape)
                 global_data_dict['global_verts_vel'] = global_verts_vel
             if self.return_cfg['pose_body']:
@@ -353,18 +352,22 @@ class GimoSubSeqDiscreteDataset(Dataset):
                 data_out = dict()
                 for k, v in global_data_dict.items():
                     data_out[k] = torch.Tensor(v)
+                # store transformations to transform back to world frame
+                meta["global_world2aligned_trans"] = global_world2aligned_trans
+                meta["global_world2aligned_rot"] = global_world2aligned_rot
+                meta["trans2joint"] = trans2joint
+
                 # add one to beta
-                meta['betas'] = torch.zeros((glob_num_frames, 10))
-                #meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
+                #meta['betas'] = torch.zeros((glob_num_frames, 10))
+                meta['betas'] = meta['betas'][0:1, :].expand((glob_num_frames, meta['betas'].size(1)))
                 return data_out, meta
 
         # set up transformation to canonical frame for all input sequences
         world2aligned_trans = np.zeros((self.sample_num_frames, 3))
         trans2joint = np.zeros((1, 1, 3))
         # align using smpl translation and root orientation
-        world2aligned_rot = np.eye(3)[None, ...].repeat(self.sample_num_frames, axis=0)
-        #world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
-        #world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
+        world2aligned_rot = world2aligned_rot[0:self.sample_num_frames].copy()
+        world2aligned_trans[:, :2] = -trans[0:self.sample_num_frames, :2].copy()
         # offset between the translation origin and the root joint (depends on body shape beta)
         trans2joint[0, 0, :2] = -(joints[0, 0, :] + world2aligned_trans[0])[:2]
 

@@ -35,9 +35,84 @@ from fitting.config import parse_args
 from fitting.fitting_utils import NSTAGES, DEFAULT_FOCAL_LEN, load_vposer, save_optim_result, save_rgb_stitched_result
 from fitting.motion_optimizer import MotionOptimizer
 from utils.video import video_to_images, run_openpose, run_deeplab_v3
+from utils.transforms import batch_rodrigues, matrot2axisangle
 
 from body_model.body_model import BodyModel
 from body_model.utils import SMPLX_PATH, SMPLH_PATH
+
+def canonical_to_world(data, align2world_rot, align2world_trans, trans2joint):
+    """
+    transforms data back from canonical frame to world frame.
+    data: optim_data / gt_data / observed_data
+    aligned2world_rot / trans: inverse of global_world2aligned_rot / trans. 
+    """
+
+    if "root_orient" in data.keys():
+        world_root_orient = data["root_orient"]
+        world_root_orient = batch_rodrigues(world_root_orient)
+        world_root_orient = torch.matmul(align2world_rot, world_root_orient)
+        world_root_orient = matrot2axisangle(world_root_orient.reshape((world_root_orient.shape[0], 1, 9)).cpu().numpy()).squeeze(1)
+        world_root_orient = torch.from_numpy(world_root_orient).to(align2world_rot)
+        data["root_orient"] = world_root_orient
+    
+    if "trans" in data.keys():
+        world_trans = data["trans"]
+        world_trans = torch.matmul(align2world_rot, world_trans.T).T
+        world_trans += align2world_trans
+        data["trans"] = world_trans
+    
+    if "joints" in data.keys():
+        world_joints = data["joints"]
+        world_joints += trans2joint
+        world_joints = torch.matmul(align2world_rot, world_joints.reshape((-1, 3)).T).T.reshape(world_joints.shape)
+        world_joints -= trans2joint
+        world_joints += align2world_trans.reshape((1, 1, 3))
+        data["joints"] = world_joints
+    
+    if "verts" in data.keys():
+        world_verts = data["verts"]
+        world_verts += trans2joint
+        world_verts = torch.matmul(align2world_rot, world_verts.reshape((-1, 3)).T).T.reshape(world_verts.shape)
+        world_verts -= trans2joint
+        world_verts += align2world_trans.reshape((1, 1, 3))
+        data["verts"] = world_verts
+    
+    if "trans_vel" in data.keys():
+        world_trans_vel = data["trans_vel"]
+        world_trans_vel = torch.matmul(align2world_rot, world_trans_vel.T).T
+        data["trans_vel"] = world_trans_vel
+    
+    if "root_orient_vel" in data.keys():
+        world_root_orient_vel = data["root_orient_vel"]
+        world_root_orient_vel = torch.matmul(align2world_rot, world_root_orient_vel.T).T
+        data["root_orient_vel"] = world_root_orient_vel
+    
+    if "joints_vel" in data.keys():
+        world_joints_vel = data["joints_vel"]
+        world_joints_vel = torch.matmul(align2world_rot, world_joints_vel.reshape((-1, 3)).T).T.reshape(world_joints_vel.shape)
+        data["joints_vel"] = world_joints_vel
+    
+    if "verts_vel" in data.keys():
+        world_verts_vel = data["verts_vel"]
+        world_verts_vel = torch.matmul(align2world_rot, world_verts_vel.reshape((-1, 3)).T).T.reshape(world_verts_vel.shape)
+
+    if "verts3d" in data.keys():
+        world_verts3d = data["verts3d"]
+        world_verts3d += trans2joint
+        world_verts3d = torch.matmul(align2world_rot, world_verts3d.reshape((-1, 3)).T).T.reshape(world_verts3d.shape)
+        world_verts3d -= trans2joint
+        world_verts3d += align2world_trans.reshape((1, 1, 3))
+        data["verts3d"] = world_verts3d
+
+    if "points3d" in data.keys():
+        world_points3d = data["points3d"]
+        world_points3d += trans2joint
+        world_points3d = torch.matmul(align2world_rot, world_points3d.reshape((-1, 3)).T).T.reshape(world_points3d.shape)
+        world_points3d -= trans2joint
+        world_points3d += align2world_trans.reshape((1, 1, 3))
+        data["points3d"] = world_points3d
+
+    return data
 
 def main(args, config_file):
     res_out_path = None
@@ -438,6 +513,96 @@ def main(args, config_file):
                                                             lbfgs_max_iter=args.lbfgs_max_iter,
                                                             stages_res_out=cur_res_out_paths,
                                                             fit_gender=fit_gender)
+
+            # transform everything to world frame
+            optim_result_lst = []
+            stage1_lst = []
+            stage2_lst = []
+            stage3_init_lst = []
+            stage3_lst = []
+            gt_lst = []
+            obs_lst = []
+            for b in range(optim_result['trans'].shape[0]):
+                optim_result_b = {k: v[b] for k, v in optim_result.items()}
+                stage1_b = {k: v[b] for k, v in per_stage_results["stage1"].items()}
+                stage2_b = {k: v[b] for k, v in per_stage_results["stage2"].items()}
+                stage3_init_b = {k: v[b] for k, v in per_stage_results["stage3_init"].items()}
+                stage3_b = {k: v[b] for k, v in per_stage_results["stage3"].items()}
+                gt_b = {k: v[b] for k, v in gt_data.items()}
+                obs_b = {k: v[b] for k, v in observed_data.items()}
+
+                world2aligned_rot = gt_data["world2aligned_rot"][b]
+                align2world_rot = torch.linalg.inv(world2aligned_rot)
+                world2aligned_trans = gt_data["world2aligned_trans"][b]
+                align2world_trans = -world2aligned_trans
+                trans2joint = gt_data["trans2joint"][b]
+
+                optim_result_b = canonical_to_world(\
+                    optim_result_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                optim_result_lst.append(optim_result_b)
+
+                stage1_b = canonical_to_world(\
+                    stage1_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                stage1_lst.append(stage1_b)
+
+                stage2_b = canonical_to_world(\
+                    stage2_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                stage2_lst.append(stage2_b)
+
+                stage3_init_b = canonical_to_world(\
+                    stage3_init_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                stage3_init_lst.append(stage3_init_b)
+
+                stage3_b = canonical_to_world(\
+                    stage3_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                stage3_lst.append(stage3_b)
+
+                gt_b = canonical_to_world(\
+                    gt_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                gt_lst.append(gt_b)
+
+                obs_b = canonical_to_world(\
+                    obs_b, \
+                    align2world_rot, \
+                    align2world_trans, \
+                    trans2joint
+                )
+                obs_lst.append(obs_b)
+            optim_result = {k: torch.stack([optim_result_lst[b][k] for b in range(len(optim_result_lst))], dim=0) for k in optim_result_lst[0].keys()}
+            stage1 = {k: torch.stack([stage1_lst[b][k] for b in range(len(stage1_lst))], dim=0) for k in stage1_lst[0].keys()}
+            stage2 = {k: torch.stack([stage2_lst[b][k] for b in range(len(stage2_lst))], dim=0) for k in stage2_lst[0].keys()}
+            stage3_init = {k: torch.stack([stage3_init_lst[b][k] for b in range(len(stage3_init_lst))], dim=0) for k in stage3_init_lst[0].keys()}
+            stage3 = {k: torch.stack([stage3_lst[b][k] for b in range(len(stage3_lst))], dim=0) for k in stage3_lst[0].keys()}
+            per_stage_results["stage1"] = stage1
+            per_stage_results["stage2"] = stage2
+            per_stage_results["stage3_init"] = stage3_init
+            per_stage_results["stage3"] = stage3
+            gt_data = {k: torch.stack([gt_lst[b][k] for b in range(len(gt_lst))], dim=0) if torch.is_tensor(gt_lst[0][k]) else [gt_lst[b][k] for b in range(len(gt_lst))] for k in gt_lst[0].keys()}
+            observed_data = {k: torch.stack([obs_lst[b][k] for b in range(len(obs_lst))], dim=0) if torch.is_tensor(obs_lst[0][k]) else [obs_lst[b][k] for b in range(len(obs_lst))] for k in obs_lst[0].keys()}
 
             # save final results
             for b in range(optim_result['latent_motion'].shape[0]):
