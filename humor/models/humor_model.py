@@ -436,12 +436,14 @@ class HumorModel(nn.Module):
 
         return mean, var
 
-    def rsample(self, mu, var):
+    def rsample(self, mu, var, scale=1., clamp_value=None):
         '''
         Return gaussian sample of (mu, var) using reparameterization trick.
         '''
         eps = torch.randn_like(mu)
-        z = mu + eps*torch.sqrt(var)
+        if clamp_value:
+          eps = torch.clamp(eps, min=-clamp_value, max=clamp_value)
+        z = mu + eps*torch.sqrt(var)*scale
         return z
 
     def decode(self, z, past_in):
@@ -787,7 +789,9 @@ class HumorModel(nn.Module):
     def roll_out(self, x_past, init_input_dict, num_steps, use_mean=False, 
                     z_seq=None, return_prior=False, gender=None, betas=None, return_z=False,
                     canonicalize_input=False,
-                    uncanonicalize_output=False):
+                    uncanonicalize_output=False,
+                    sample_scale=1.,
+                    clamp_value=2.):
         '''
         Given input for first step, roll out using own output the entire time by sampling from the prior.
         Returns the global trajectory.
@@ -875,7 +879,7 @@ class HumorModel(nn.Module):
             z_in = None
             if z_seq is not None:
                 z_in = z_seq[:,t]
-            sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z)
+            sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z, scale=sample_scale, clamp_value=clamp_value)
             if return_prior:
                 prior_out = sample_out['prior']
                 prior_seq.append(prior_out)
@@ -1023,7 +1027,7 @@ class HumorModel(nn.Module):
         else:   
             return pred_seq_out
             
-    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False):
+    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False, scale=1., clamp_value=None):
         '''
         Given past, samples next future state by sampling from prior or posterior and decoding.
         If z (B x D) is not None, uses the given z instead of sampling from posterior or prior
@@ -1049,7 +1053,7 @@ class HumorModel(nn.Module):
         # sample from distrib or use mean
         if z is None:
             if not use_mean:
-                z = self.rsample(pm, pv)
+                z = self.rsample(pm, pv, scale, clamp_value)
             else:
                 z = pm # NOTE: use mean
 
