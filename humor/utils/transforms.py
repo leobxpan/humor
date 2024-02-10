@@ -15,8 +15,8 @@ XY_AXIS_GLOB = torch.Tensor([[1.0, 1.0, 0.0]]).to(device=GLOB_DEVICE)
 X_AXIS_GLOB = torch.Tensor([[1.0, 0.0, 0.0]]).to(device=GLOB_DEVICE)
 
 def compute_aligned_from_right(body_right):
-    xy_axis = XY_AXIS_GLOB
-    x_axis = X_AXIS_GLOB
+    xy_axis = XY_AXIS_GLOB.to(body_right)
+    x_axis = X_AXIS_GLOB.to(body_right)
 
     body_right_x_proj = body_right[:,0:1] / (torch.norm(body_right[:,:2], dim=1, keepdim=True) + 1e-6)
     body_right_x_proj = torch.clamp(body_right_x_proj, min=-1.0, max=1.0) # avoid acos error
