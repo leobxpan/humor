@@ -252,7 +252,7 @@ class HumorLoss(nn.Module):
             gt_vals = [gt_trans, gt_orient, gt_pose, betas]
 
             # have to split by gender to make sure we use the correct body model
-            gender_names = ['male', 'female', 'neutral']
+            gender_names = ['male', 'female']
             mask_list = []
             pred_joints = []
             pred_mesh = []

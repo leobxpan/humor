@@ -34,7 +34,7 @@ DISCARD_TERRAIN_SEQUENCES = True # throw away sequences where the person steps o
 VIZ_PLOTS = False
 VIZ_SEQ = False
 
-ALL_DATASETS = ['ACCAD', 'BMLmovi', 'BioMotionLab_NTroje', 'BMLhandball', 'CMU', 'DanceDB', 'DFaust_67', 
+ALL_DATASETS = ['ACCAD', 'BMLmovi', 'BioMotionLab_NTroje', 'BMLhandball', 'CMU', 'DFaust_67', 
                 'EKUT', 'Eyes_Japan_Dataset', 'HumanEva', 'KIT', 'MPI_HDM05', 
                 'MPI_Limits', 'MPI_mosh', 'SFU', 'SSM_synced', 'TCD_handMocap', 
                 'TotalCapture', 'Transitions_mocap'] # everything in AMASS

@@ -7,11 +7,7 @@ def parse_args(argv):
 
     # Observed data options
     parser.add_argument('--data-path', type=str, required=True, help='Path to the data to fit.')
-    parser.add_argument('--splits-path', type=str, default=None, help='Path to data splits to use.')
-    parser.add_argument('--split', type=str, default='train', help='Train / test split.')
-    parser.add_argument('--orig-data-root', default="/scr/bxpan/gaze_dataset", type=str)
-
-    parser.add_argument('--data-type', type=str, required=True, choices=['AMASS', 'GIMO', 'PROX-RGB', 'PROX-RGBD', 'iMapper-RGB', 'RGB'], help='The type of data we are fitting to.')
+    parser.add_argument('--data-type', type=str, required=True, choices=['AMASS', 'PROX-RGB', 'PROX-RGBD', 'iMapper-RGB', 'RGB'], help='The type of data we are fitting to.')
     parser.add_argument('--data-fps', type=int, default=30, help='Sampling rate of the data.')
     parser.add_argument('--batch-size', type=int, default=1, help='Number of sequences to batch together for fitting to data.')
     parser.add_argument('--shuffle', dest='shuffle', action='store_true', help="Shuffles data.")

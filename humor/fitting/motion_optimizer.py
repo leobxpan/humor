@@ -373,7 +373,7 @@ class MotionOptimizer():
                 vel_root_orient = prior_data_dict['root_orient']
 
             self.trans_vel, self.joints_vel, self.root_orient_vel = \
-                        self.estimate_velocities(self.trans, self.root_orient, cur_body_pose, self.betas, data_fps)
+                        self.estimate_velocities(vel_trans, vel_root_orient, cur_body_pose, self.betas, data_fps)
             
             self.trans_vel = self.trans_vel[:,:1].detach()
             self.joints_vel = self.joints_vel[:,:1].detach()
@@ -619,8 +619,7 @@ class MotionOptimizer():
                                                                             self.betas,
                                                                             prior_opt_params,
                                                                             self.latent_motion,
-                                                                            fit_gender=fit_gender,
-                                                                            return_vel=True)
+                                                                            fit_gender=fit_gender)
         body_pose = rollout_results['pose_body']
         self.latent_pose = self.pose2latent(body_pose)
         self.trans = cam_rollout_results['trans']
@@ -646,10 +645,6 @@ class MotionOptimizer():
         final_optim_res = self.get_optim_result(body_pose)
         if rollout_results is not None and 'contacts' in rollout_results:
             final_optim_res['contacts'] = rollout_results['contacts']
-        if "trans_vel" in rollout_results:
-            final_optim_res['trans_vel'] = rollout_results['trans_vel']
-            final_optim_res['root_orient_vel'] = rollout_results['root_orient_vel']
-            final_optim_res['joints_vel'] = rollout_results['joints_vel']
         
         if self.optim_floor: 
             # go back and also save results from stage 2 using the final optimized floor to transform to prior frame
@@ -923,7 +918,7 @@ class MotionOptimizer():
             smpl_results, _ = self.smpl_results(trans, root_orient, body_pose, betas)
             joints = smpl_results['joints3d']
             # update to correct rotations for input
-            root_orient_in = root_orient
+            root_orient_in = root_orient 
             body_pose_in = body_pose
             if self.motion_prior.in_rot_rep == 'mat' or self.motion_prior.in_rot_rep == '6d':
                 root_orient_in = batch_rodrigues(root_orient.reshape(-1, 3)).reshape((B, 1, 9))

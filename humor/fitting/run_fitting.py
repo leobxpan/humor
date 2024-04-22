@@ -13,9 +13,6 @@ sys.path.append(os.path.join(cur_file_path, '..'))
 import importlib, time, math, shutil, json
 import traceback
 
-import pickle
-from collections import defaultdict
-
 import numpy as np
 
 import torch
@@ -25,7 +22,6 @@ from utils.logging import Logger, cp_files
 from models.humor_model import HumorModel
 from datasets.amass_discrete_dataset import AmassDiscreteDataset
 from datasets.amass_fit_dataset import AMASSFitDataset
-from datasets.gimo_fit_dataset import GIMOFitDataset
 from datasets.prox_dataset import ProxDataset
 from datasets.imapper_dataset import iMapperDataset
 from datasets.rgb_dataset import RGBVideoDataset
@@ -35,84 +31,9 @@ from fitting.config import parse_args
 from fitting.fitting_utils import NSTAGES, DEFAULT_FOCAL_LEN, load_vposer, save_optim_result, save_rgb_stitched_result
 from fitting.motion_optimizer import MotionOptimizer
 from utils.video import video_to_images, run_openpose, run_deeplab_v3
-from utils.transforms import batch_rodrigues, matrot2axisangle
 
 from body_model.body_model import BodyModel
 from body_model.utils import SMPLX_PATH, SMPLH_PATH
-
-def canonical_to_world(data, align2world_rot, align2world_trans, trans2joint):
-    """
-    transforms data back from canonical frame to world frame.
-    data: optim_data / gt_data / observed_data
-    aligned2world_rot / trans: inverse of global_world2aligned_rot / trans. 
-    """
-
-    if "root_orient" in data.keys():
-        world_root_orient = data["root_orient"]
-        world_root_orient = batch_rodrigues(world_root_orient)
-        world_root_orient = torch.matmul(align2world_rot, world_root_orient)
-        world_root_orient = matrot2axisangle(world_root_orient.reshape((world_root_orient.shape[0], 1, 9)).cpu().numpy()).squeeze(1)
-        world_root_orient = torch.from_numpy(world_root_orient).to(align2world_rot)
-        data["root_orient"] = world_root_orient
-    
-    if "trans" in data.keys():
-        world_trans = data["trans"]
-        world_trans = torch.matmul(align2world_rot, world_trans.T).T
-        world_trans += align2world_trans
-        data["trans"] = world_trans
-    
-    if "joints" in data.keys():
-        world_joints = data["joints"]
-        world_joints += trans2joint
-        world_joints = torch.matmul(align2world_rot, world_joints.reshape((-1, 3)).T).T.reshape(world_joints.shape)
-        world_joints -= trans2joint
-        world_joints += align2world_trans.reshape((1, 1, 3))
-        data["joints"] = world_joints
-    
-    if "verts" in data.keys():
-        world_verts = data["verts"]
-        world_verts += trans2joint
-        world_verts = torch.matmul(align2world_rot, world_verts.reshape((-1, 3)).T).T.reshape(world_verts.shape)
-        world_verts -= trans2joint
-        world_verts += align2world_trans.reshape((1, 1, 3))
-        data["verts"] = world_verts
-    
-    if "trans_vel" in data.keys():
-        world_trans_vel = data["trans_vel"]
-        world_trans_vel = torch.matmul(align2world_rot, world_trans_vel.T).T
-        data["trans_vel"] = world_trans_vel
-    
-    if "root_orient_vel" in data.keys():
-        world_root_orient_vel = data["root_orient_vel"]
-        world_root_orient_vel = torch.matmul(align2world_rot, world_root_orient_vel.T).T
-        data["root_orient_vel"] = world_root_orient_vel
-    
-    if "joints_vel" in data.keys():
-        world_joints_vel = data["joints_vel"]
-        world_joints_vel = torch.matmul(align2world_rot, world_joints_vel.reshape((-1, 3)).T).T.reshape(world_joints_vel.shape)
-        data["joints_vel"] = world_joints_vel
-    
-    if "verts_vel" in data.keys():
-        world_verts_vel = data["verts_vel"]
-        world_verts_vel = torch.matmul(align2world_rot, world_verts_vel.reshape((-1, 3)).T).T.reshape(world_verts_vel.shape)
-
-    if "verts3d" in data.keys():
-        world_verts3d = data["verts3d"]
-        world_verts3d += trans2joint
-        world_verts3d = torch.matmul(align2world_rot, world_verts3d.reshape((-1, 3)).T).T.reshape(world_verts3d.shape)
-        world_verts3d -= trans2joint
-        world_verts3d += align2world_trans.reshape((1, 1, 3))
-        data["verts3d"] = world_verts3d
-
-    if "points3d" in data.keys():
-        world_points3d = data["points3d"]
-        world_points3d += trans2joint
-        world_points3d = torch.matmul(align2world_rot, world_points3d.reshape((-1, 3)).T).T.reshape(world_points3d.shape)
-        world_points3d -= trans2joint
-        world_points3d += align2world_trans.reshape((1, 1, 3))
-        data["points3d"] = world_points3d
-
-    return data
 
 def main(args, config_file):
     res_out_path = None
@@ -147,22 +68,6 @@ def main(args, config_file):
     rgb_vid_name = None
     if args.data_type == 'AMASS':
         dataset = AMASSFitDataset(args.data_path,
-                                  seq_len=args.amass_seq_len,
-                                  return_joints=args.amass_use_joints,
-                                  return_verts=args.amass_use_verts,
-                                  return_points=args.amass_use_points,
-                                  noise_std=args.amass_noise_std,
-                                  make_partial=args.amass_make_partial,
-                                  partial_height=args.amass_partial_height,
-                                  drop_middle=args.amass_drop_middle,
-                                  root_only=args.amass_root_joint_only,
-                                  split_by=args.amass_split_by,
-                                  custom_split=args.amass_custom_split)
-        data_fps = 30
-    if args.data_type == 'GIMO':
-        dataset = GIMOFitDataset(args.data_path,
-                                  splits_path=args.splits_path,
-                                  split=args.split,
                                   seq_len=args.amass_seq_len,
                                   return_joints=args.amass_use_joints,
                                   return_verts=args.amass_use_verts,
@@ -226,8 +131,8 @@ def main(args, config_file):
                                                             fps=30,
                                                             img_folder=img_folder,
                                                             return_info=True)
-            # print(img_folder)
-            # print(img_shape)
+            print(img_folder)
+            print(img_shape)
 
             if not use_custom_keypts:
                 # OpenPose on images
@@ -287,7 +192,6 @@ def main(args, config_file):
     else:
         raise NotImplementedError('Fitting for arbitrary RGB-D videos is not yet implemented')
 
-    dataset[0]
     data_loader = DataLoader(dataset, 
                             batch_size=B,
                             shuffle=args.shuffle,
@@ -358,9 +262,6 @@ def main(args, config_file):
 
     if args.data_type == 'RGB' and args.save_results:
         all_res_out_paths = []
-
-    # all_motion_latents = defaultdict(dict)
-    all_optim_res = defaultdict(dict)
 
     fit_errs = dict()
     prev_batch_overlap_res_dict = None
@@ -514,111 +415,7 @@ def main(args, config_file):
                                                             stages_res_out=cur_res_out_paths,
                                                             fit_gender=fit_gender)
 
-            # transform everything to world frame
-            optim_result_lst = []
-            stage1_lst = []
-            stage2_lst = []
-            stage3_init_lst = []
-            stage3_lst = []
-            gt_lst = []
-            obs_lst = []
-            for b in range(optim_result['trans'].shape[0]):
-                optim_result_b = {k: v[b] for k, v in optim_result.items()}
-                stage1_b = {k: v[b] for k, v in per_stage_results["stage1"].items()}
-                stage2_b = {k: v[b] for k, v in per_stage_results["stage2"].items()}
-                stage3_init_b = {k: v[b] for k, v in per_stage_results["stage3_init"].items()}
-                stage3_b = {k: v[b] for k, v in per_stage_results["stage3"].items()}
-                gt_b = {k: v[b] for k, v in gt_data.items()}
-                obs_b = {k: v[b] for k, v in observed_data.items()}
-
-                world2aligned_rot = gt_data["world2aligned_rot"][b]
-                align2world_rot = torch.linalg.inv(world2aligned_rot)
-                world2aligned_trans = gt_data["world2aligned_trans"][b]
-                align2world_trans = -world2aligned_trans
-                trans2joint = gt_data["trans2joint"][b]
-
-                optim_result_b = canonical_to_world(\
-                    optim_result_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                optim_result_lst.append(optim_result_b)
-
-                stage1_b = canonical_to_world(\
-                    stage1_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                stage1_lst.append(stage1_b)
-
-                stage2_b = canonical_to_world(\
-                    stage2_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                stage2_lst.append(stage2_b)
-
-                stage3_init_b = canonical_to_world(\
-                    stage3_init_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                stage3_init_lst.append(stage3_init_b)
-
-                stage3_b = canonical_to_world(\
-                    stage3_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                stage3_lst.append(stage3_b)
-
-                gt_b = canonical_to_world(\
-                    gt_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                gt_lst.append(gt_b)
-
-                obs_b = canonical_to_world(\
-                    obs_b, \
-                    align2world_rot, \
-                    align2world_trans, \
-                    trans2joint
-                )
-                obs_lst.append(obs_b)
-            optim_result = {k: torch.stack([optim_result_lst[b][k] for b in range(len(optim_result_lst))], dim=0) for k in optim_result_lst[0].keys()}
-            stage1 = {k: torch.stack([stage1_lst[b][k] for b in range(len(stage1_lst))], dim=0) for k in stage1_lst[0].keys()}
-            stage2 = {k: torch.stack([stage2_lst[b][k] for b in range(len(stage2_lst))], dim=0) for k in stage2_lst[0].keys()}
-            stage3_init = {k: torch.stack([stage3_init_lst[b][k] for b in range(len(stage3_init_lst))], dim=0) for k in stage3_init_lst[0].keys()}
-            stage3 = {k: torch.stack([stage3_lst[b][k] for b in range(len(stage3_lst))], dim=0) for k in stage3_lst[0].keys()}
-            per_stage_results["stage1"] = stage1
-            per_stage_results["stage2"] = stage2
-            per_stage_results["stage3_init"] = stage3_init
-            per_stage_results["stage3"] = stage3
-            gt_data = {k: torch.stack([gt_lst[b][k] for b in range(len(gt_lst))], dim=0) if torch.is_tensor(gt_lst[0][k]) else [gt_lst[b][k] for b in range(len(gt_lst))] for k in gt_lst[0].keys()}
-            observed_data = {k: torch.stack([obs_lst[b][k] for b in range(len(obs_lst))], dim=0) if torch.is_tensor(obs_lst[0][k]) else [obs_lst[b][k] for b in range(len(obs_lst))] for k in obs_lst[0].keys()}
-
             # save final results
-            for b in range(optim_result['latent_motion'].shape[0]):
-                optim_res = {k: optim_result[k][b].cpu().squeeze(0) for k in optim_result.keys()}
-                # motion_latent = optim_result['latent_motion'][b].cpu().squeeze(0)
-                scene = gt_data['scene'][b]
-                seq = gt_data['seq'][b]
-                start_idx = int(gt_data['start_idx'][b])
-
-                if not scene in all_optim_res.keys():
-                    all_optim_res[scene] = {}
-
-                if not seq in all_optim_res[scene].keys():
-                    all_optim_res[scene][seq] = {}
-
-                all_optim_res[scene][seq][start_idx] = optim_res
             if cur_res_out_paths is not None:
                 save_optim_result(cur_res_out_paths, optim_result, per_stage_results, gt_data, observed_data, args.data_type,
                                     optim_floor=optimizer.optim_floor,
@@ -647,13 +444,6 @@ def main(args, config_file):
         del observed_data
         del gt_data
         torch.cuda.empty_cache()
-
-    latent_root = '/scr/bxpan/gaze_dataset'
-    for scene, scene_res in all_optim_res.items():
-        for seq, seq_res in scene_res.items():
-            latent_pkl_path = os.path.join(latent_root, scene, seq, "humor_optim_res_60_seq_%s.pkl"%args.split)
-            with open(latent_pkl_path, 'wb') as f:
-                pickle.dump(seq_res, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # if RGB video, stitch together subsequences
     if args.data_type == 'RGB' and args.save_results:

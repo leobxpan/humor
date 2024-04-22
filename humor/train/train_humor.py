@@ -1,4 +1,3 @@
-
 import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
@@ -44,7 +43,7 @@ def train(args_obj, config_file):
     Logger.log('Dataset args: ' + str(args_obj.dataset))
     Logger.log('Loss args: ' + str(args_obj.loss))
 
-    exp_name = "humor_retrain_walking_qual_kl_4e-4_continue"
+    exp_name = "humor_train_walking_no_vel_loss_kl_4e-4"
     wandb.init(
         project="motion-field",
         entity="boxiaopan",
@@ -67,16 +66,14 @@ def train(args_obj, config_file):
     # load model class and instantiate
     model_class = importlib.import_module('models.' + model_file)
     Model = getattr(model_class, args.model)
-    model = Model(**args_obj.model_dict)
-    # model = Model(**args_obj.model_dict,
-    #                 model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
+    model = Model(**args_obj.model_dict,
+                    model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
 
     # load loss class and instantiate
     loss_class = importlib.import_module('losses.' + loss_file)
     Loss = getattr(loss_class, args.loss)
-    # loss_func = Loss(**args_obj.loss_dict,
-    #                  smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
-    loss_func = Loss(**args_obj.loss_dict)
+    loss_func = Loss(**args_obj.loss_dict,
+                     smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
 
     device = get_device(args.gpu)
     model.to(device)
