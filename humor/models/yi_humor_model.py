@@ -1,6 +1,5 @@
-import os, sys
 
-import time
+import time, os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -116,7 +115,7 @@ class YiHumorModel(nn.Module):
                         model_use_smpl_joint_inputs=False, # if true, uses smpl joints rather than regressed joints to input at next step (during rollout and sched samp)
                         model_smpl_batch_size=1 # if using smpl joint inputs this should be batch_size of the smpl model (aka data input to rollout)
                 ):
-        super(HumorModel, self).__init__()
+        super(YiHumorModel, self).__init__()
         self.ignore_keys = []
 
         self.steps_in = steps_in
@@ -315,7 +314,6 @@ class YiHumorModel(nn.Module):
                 return x_past
 
     def split_output(self, decoder_out, convert_rots=True):
-
         '''
         Given the output of the decoder, splits into each state component.
         Also transform rotation representation to matrices.
@@ -436,13 +434,11 @@ class YiHumorModel(nn.Module):
 
         return mean, var
 
-    def rsample(self, mu, var, clamp_value=None):
+    def rsample(self, mu, var):
         '''
         Return gaussian sample of (mu, var) using reparameterization trick.
         '''
         eps = torch.randn_like(mu)
-        if clamp_value:
-          eps = torch.clamp(eps, min=-clamp_value, max=clamp_value)
         z = mu + eps*torch.sqrt(var)
         return z
 
@@ -788,10 +784,8 @@ class YiHumorModel(nn.Module):
 
     def roll_out(self, x_past, init_input_dict, num_steps, use_mean=False, 
                     z_seq=None, return_prior=False, gender=None, betas=None, return_z=False,
-                    mean=None, var=None,
                     canonicalize_input=False,
-                    uncanonicalize_output=False,
-                    clamp_value=None):
+                    uncanonicalize_output=False):
         '''
         Given input for first step, roll out using own output the entire time by sampling from the prior.
         Returns the global trajectory.
@@ -807,7 +801,6 @@ class YiHumorModel(nn.Module):
         -gender : list of e.g. ['male', 'female', etc..] of length B
         -betas : B x steps_in x D
         -return_z : returns the sampled z sequence in addition to the output
-        - mean / var: use provided mean and variance instead of sampling from prior
         - canonicalize_input : if true, the input initial state is assumed to not be in the local aligned coordinate system. It will be transformed before using.
         - uncanonicalize_output : if true and canonicalize_input=True, will transform output back into the input frame rather than return in canonical frame.
         Returns: 
@@ -880,12 +873,7 @@ class YiHumorModel(nn.Module):
             z_in = None
             if z_seq is not None:
                 z_in = z_seq[:,t]
-
-            if mean is not None and var is not None:
-                sample_out = self.decode_from_mean_var(past_in, mean, var, return_prior=return_prior, return_z=return_z, clamp_value=clamp_value)
-            else:
-                sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z, clamp_value=clamp_value)
-
+            sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z)
             if return_prior:
                 prior_out = sample_out['prior']
                 prior_seq.append(prior_out)
@@ -941,8 +929,6 @@ class YiHumorModel(nn.Module):
                     # reconstruct SMPL
                     cur_pred_trans, cur_pred_orient, cur_betas, cur_pred_pose = pad_list
                     bm = self.bm_dict[gender_name]
-
-                    cur_betas = torch.zeros(1, 16).to(cur_pred_pose)
                     pred_body = bm(pose_body=cur_pred_pose, betas=cur_betas, root_orient=cur_pred_orient, trans=cur_pred_trans)
                     if pad_size > 0:
                         pred_joints.append(pred_body.Jtr[:-pad_size])
@@ -1029,29 +1015,8 @@ class YiHumorModel(nn.Module):
             return pred_seq_out, (pm, pv)
         else:   
             return pred_seq_out
-
-    def decode_from_mean_var(self, past_in, mean, var, return_prior=False, return_z=False, clamp_value=None):
-        """
-        Given past, as well as a provided mean and variance, first sample a z from the distrib,
-        then decode with the sampled z.
-        """
-        B = past_in.size(0)
-
-        z = self.rsample(mean, var, clamp_value)
-
-        # decode to get next step
-        decoder_out = self.decode(z, past_in)
-        decoder_out = decoder_out.reshape((B, self.steps_out, -1)) # B x steps_out x D_out
-
-        out_dict = {'decoder_out' : decoder_out}
-        if return_prior:
-            out_dict['prior'] = (mean, var)
-        if return_z:
-            out_dict['z'] = z
-        
-        return out_dict
-
-    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False, clamp_value=None):
+            
+    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False):
         '''
         Given past, samples next future state by sampling from prior or posterior and decoding.
         If z (B x D) is not None, uses the given z instead of sampling from posterior or prior
@@ -1077,7 +1042,7 @@ class YiHumorModel(nn.Module):
         # sample from distrib or use mean
         if z is None:
             if not use_mean:
-                z = self.rsample(pm, pv, clamp_value)
+                z = self.rsample(pm, pv)
             else:
                 z = pm # NOTE: use mean
 

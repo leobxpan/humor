@@ -171,6 +171,40 @@ class TestConfig(BaseConfig):
 # NOTE: must be named ModelNameConfig to be properly loaded. Also should not clash names with any Base/Train/Test configuration flags.
 #
 
+class YiHumorModelConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to models.HumorModel model class.
+    '''
+    def __init__(self, argv):
+        super(YiHumorModelConfig, self).__init__(argv)
+        # arguments specific to this model
+        self.parser.add_argument('--out-rot-rep', type=str, default='aa', choices=['aa', '6d', '9d'], help='Rotation representation to output from the model.')
+        self.parser.add_argument('--in-rot-rep', type=str, default='mat', choices=['aa', '6d', 'mat'], help='Rotation representation to input to the model for the relative full sequence input.')
+        self.parser.add_argument('--latent-size', type=int, default=48, help='Size of the latent feature.')
+
+        self.parser.add_argument('--model-steps-in', dest='steps_in', type=int, default=1, help='At each step of the sequence, the number of input frames.')
+
+        self.parser.add_argument('--no-conditional-prior', dest='conditional_prior', action='store_false', help="Conditions the prior on the past input sequence.")
+        self.parser.set_defaults(conditional_prior=True)
+        self.parser.add_argument('--no-output-delta', dest='output_delta', action='store_false', help="Each step predicts the residual rather than the next step.")
+        self.parser.set_defaults(output_delta=True)
+
+        self.parser.add_argument('--posterior-arch', type=str, default='mlp', choices=['mlp'], help='')
+        self.parser.add_argument('--decoder-arch', type=str, default='mlp', choices=['mlp'], help='')
+        self.parser.add_argument('--prior-arch', type=str, default='mlp', choices=['mlp'], help='')
+
+        self.parser.add_argument('--model-data-config', type=str, default='smpl+joints+contacts', choices=['smpl+joints', 'smpl+joints+contacts'], help='which state configuration to use for the model')
+
+        self.parser.add_argument('--no-detach-sched-samp', dest='detach_sched_samp', action='store_false', help="Allows gradients to backprop through multiple output steps when using schedules sampling.")
+        self.parser.set_defaults(detach_sched_samp=True)
+
+        self.parser.add_argument('--model-use-smpl-joint-inputs', dest='model_use_smpl_joint_inputs', action='store_true', help="uses smpl joints rather than regressed joints to input at next step (during rollout and sched samp).")
+        self.parser.set_defaults(model_use_smpl_joint_inputs=False)
+
+        self.parser.add_argument('--output-delta', dest='output_delta', action='store_true')
+        self.parser.set_defaults(output_delta=False)
+
+
 class HumorModelConfig(BaseSubConfig):
     '''
     Configuration for arguments specific to models.HumorModel model class.
