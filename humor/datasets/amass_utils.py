@@ -28,6 +28,7 @@ NUM_KEYPT_VERTS = 43
 DATA_NAMES = ['trans', 'trans_vel', 'root_orient', 'root_orient_vel', 'pose_body', 'pose_body_vel', 'joints', 'joints_vel', 'joints_orient_vel', 'verts', 'verts_vel', 'contacts']
 
 SMPL_JOINTS_RETURN_CONFIG = {
+    'use_smpl_frame': True,
     'trans' : True,
     'trans_vel' : True,
     'root_orient' : True,
@@ -43,6 +44,7 @@ SMPL_JOINTS_RETURN_CONFIG = {
 }
 
 SMPL_JOINTS_CONTACTS_RETURN_CONFIG = {
+    'use_smpl_frame': True,
     'trans' : True,
     'trans_vel' : True,
     'root_orient' : True,
@@ -58,6 +60,7 @@ SMPL_JOINTS_CONTACTS_RETURN_CONFIG = {
 }
 
 ALL_RETURN_CONFIG = {
+    'use_smpl_frame': True,
     'trans' : True,
     'trans_vel' : True,
     'root_orient' : True,
@@ -72,7 +75,24 @@ ALL_RETURN_CONFIG = {
     'contacts' : True
 }
 
+JOINTS_VERTS_RETURN_CONFIG = {
+    'use_smpl_frame' : False, # use joint frame
+    'trans' : False,
+    'trans_vel' : False,
+    'root_orient' : False,
+    'root_orient_vel' : False,
+    'pose_body' : False,
+    'pose_body_vel' : False,
+    'joints' : True,
+    'joints_vel' : True,
+    'joints_orient_vel' : True,
+    'verts' : True,
+    'verts_vel' : True,
+    'contacts' : False
+}
+
 RETURN_CONFIGS = {
+                  'joints+verts' : JOINTS_VERTS_RETURN_CONFIG,
                   'smpl+joints+contacts' : SMPL_JOINTS_CONTACTS_RETURN_CONFIG,
                   'smpl+joints' : SMPL_JOINTS_RETURN_CONFIG,
                   'all' : ALL_RETURN_CONFIG

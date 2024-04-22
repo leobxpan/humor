@@ -3,7 +3,8 @@ import sys, os
 cur_file_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(cur_file_path, '..'))
 
-os.environ['DISPLAY'] = ':1'
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+#os.environ['DISPLAY'] = ':1'
 
 import importlib, time
 
@@ -62,14 +63,14 @@ def test(args_obj, config_file):
     # load model class and instantiate
     model_class = importlib.import_module('models.' + model_file)
     Model = getattr(model_class, args.model)
-    model = Model(**args_obj.model_dict,
-                    model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
+    model = Model(**args_obj.model_dict)
+                    #model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
 
     # load loss class and instantiate
     loss_class = importlib.import_module('losses.' + loss_file)
     Loss = getattr(loss_class, args.loss)
-    loss_func = Loss(**args_obj.loss_dict,
-                      smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
+    loss_func = Loss(**args_obj.loss_dict)
+                      #smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
 
     device = get_device(args.gpu)
     model.to(device)
@@ -203,7 +204,6 @@ def eval_sampling(model, test_dataset, test_loader, device,
         for i, data in enumerate(test_loader):
             # get inputs
 
-            import pdb; pdb.set_trace()
             batch_in, batch_out, meta = data
             print(meta['path'])
             seq_name_list = [spath[:-4] for spath in meta['path']]

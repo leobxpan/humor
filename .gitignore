@@ -13,3 +13,5 @@ humor/vposer_v1_0
 *.pkl
 
 rollout_humor_scripts/*/
+
+wandb

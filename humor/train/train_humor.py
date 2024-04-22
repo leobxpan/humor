@@ -17,6 +17,8 @@ from utils.logging import Logger, class_name_to_file_name, mkdir, cp_files
 from utils.torch import get_device, save_state, load_state
 from utils.stats import StatTracker
 
+import wandb
+
 NUM_WORKERS = 2
 
 def parse_args(argv):
@@ -42,6 +44,14 @@ def train(args_obj, config_file):
     Logger.log('Dataset args: ' + str(args_obj.dataset))
     Logger.log('Loss args: ' + str(args_obj.loss))
 
+    exp_name = "humor_retrain_walking_qual_kl_4e-4_continue"
+    wandb.init(
+        project="motion-field",
+        entity="boxiaopan",
+        name=exp_name,
+        sync_tensorboard=True,
+    )
+
     # save training script/model/dataset used
     train_scripts_path = os.path.join(args.out, 'train_scripts')
     mkdir(train_scripts_path)
@@ -57,14 +67,16 @@ def train(args_obj, config_file):
     # load model class and instantiate
     model_class = importlib.import_module('models.' + model_file)
     Model = getattr(model_class, args.model)
-    model = Model(**args_obj.model_dict,
-                    model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
+    model = Model(**args_obj.model_dict)
+    # model = Model(**args_obj.model_dict,
+    #                 model_smpl_batch_size=args.batch_size) # assumes model is HumorModel
 
     # load loss class and instantiate
     loss_class = importlib.import_module('losses.' + loss_file)
     Loss = getattr(loss_class, args.loss)
-    loss_func = Loss(**args_obj.loss_dict,
-                     smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
+    # loss_func = Loss(**args_obj.loss_dict,
+    #                  smpl_batch_size=args.batch_size*args_obj.dataset.sample_num_frames) # assumes loss is HumorLoss
+    loss_func = Loss(**args_obj.loss_dict)
 
     device = get_device(args.gpu)
     model.to(device)
@@ -303,6 +315,7 @@ def train(args_obj, config_file):
         torch.cuda.empty_cache()
 
     Logger.log('Finished!')
+    wandb.finish()
 
 def main(args, config_file):
     train(args, config_file)
