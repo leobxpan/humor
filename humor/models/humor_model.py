@@ -436,14 +436,14 @@ class HumorModel(nn.Module):
 
         return mean, var
 
-    def rsample(self, mu, var, scale=1., clamp_value=None):
+    def rsample(self, mu, var, clamp_value=None):
         '''
         Return gaussian sample of (mu, var) using reparameterization trick.
         '''
         eps = torch.randn_like(mu)
         if clamp_value:
           eps = torch.clamp(eps, min=-clamp_value, max=clamp_value)
-        z = mu + eps*torch.sqrt(var)*scale
+        z = mu + eps*torch.sqrt(var)
         return z
 
     def decode(self, z, past_in):
@@ -791,8 +791,7 @@ class HumorModel(nn.Module):
                     mean=None, var=None,
                     canonicalize_input=False,
                     uncanonicalize_output=False,
-                    sample_scale=1.,
-                    clamp_value=2.):
+                    clamp_value=None):
         '''
         Given input for first step, roll out using own output the entire time by sampling from the prior.
         Returns the global trajectory.
@@ -883,9 +882,9 @@ class HumorModel(nn.Module):
                 z_in = z_seq[:,t]
 
             if mean is not None and var is not None:
-                sample_out = self.decode_from_mean_var(past_in, mean, var, return_prior=return_prior, return_z=return_z, scale=sample_scale, clamp_value=clamp_value)
+                sample_out = self.decode_from_mean_var(past_in, mean, var, return_prior=return_prior, return_z=return_z, clamp_value=clamp_value)
             else:
-                sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z, scale=sample_scale, clamp_value=clamp_value)
+                sample_out = self.sample_step(past_in, use_mean=use_mean, z=z_in, return_prior=return_prior, return_z=return_z, clamp_value=clamp_value)
 
             if return_prior:
                 prior_out = sample_out['prior']
@@ -977,9 +976,6 @@ class HumorModel(nn.Module):
             world2aligned_rot = compute_world2aligned_mat(root_orient_mat)
             world2aligned_trans = torch.cat([-x_pred_dict['trans'][:,0,:2], torch.zeros((B,1)).to(x_past)], axis=1)
 
-            root_orient_mat = x_pred_dict['root_orient'][:,0,:].reshape((B, 3, 3))
-            world2aligned_rot = compute_world2aligned_mat(root_orient_mat)
-            world2aligned_trans = torch.cat([-x_pred_dict['trans'][:,0,:2], torch.zeros((B,1)).to(x_past)], axis=1)
             #
             # transform inputs to this local frame (body pose is not affected) for next step
             #
@@ -1034,14 +1030,14 @@ class HumorModel(nn.Module):
         else:   
             return pred_seq_out
 
-    def decode_from_mean_var(self, past_in, mean, var, return_prior=False, return_z=False, scale=1., clamp_value=2):
+    def decode_from_mean_var(self, past_in, mean, var, return_prior=False, return_z=False, clamp_value=None):
         """
         Given past, as well as a provided mean and variance, first sample a z from the distrib,
         then decode with the sampled z.
         """
         B = past_in.size(0)
 
-        z = self.rsample(mean, var, scale, clamp_value)
+        z = self.rsample(mean, var, clamp_value)
 
         # decode to get next step
         decoder_out = self.decode(z, past_in)
@@ -1055,7 +1051,7 @@ class HumorModel(nn.Module):
         
         return out_dict
 
-    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False, scale=1., clamp_value=None):
+    def sample_step(self, past_in, t_in=None, use_mean=False, z=None, return_prior=False, return_z=False, clamp_value=None):
         '''
         Given past, samples next future state by sampling from prior or posterior and decoding.
         If z (B x D) is not None, uses the given z instead of sampling from posterior or prior
@@ -1081,7 +1077,7 @@ class HumorModel(nn.Module):
         # sample from distrib or use mean
         if z is None:
             if not use_mean:
-                z = self.rsample(pm, pv, scale, clamp_value)
+                z = self.rsample(pm, pv, clamp_value)
             else:
                 z = pm # NOTE: use mean
 
