@@ -547,12 +547,12 @@ class HumorModel(nn.Module):
                 gender_names = ['male', 'female', 'neutral']
                 pred_joints = []
                 prev_nbidx = 0
-                cat_idx_map = np.ones((B), dtype=np.int)*-1
+                cat_idx_map = np.ones((B), dtype=int)*-1
                 for gender_name in gender_names:
                     gender_idx = np.array(gender) == gender_name
                     nbidx = np.sum(gender_idx)
 
-                    cat_idx_map[gender_idx] = np.arange(prev_nbidx, prev_nbidx + nbidx, dtype=np.int)
+                    cat_idx_map[gender_idx] = np.arange(prev_nbidx, prev_nbidx + nbidx, dtype=int)
                     prev_nbidx += nbidx
 
                     gender_smpl_vals = [val[gender_idx] for val in smpl_vals]
@@ -906,11 +906,11 @@ class HumorModel(nn.Module):
                 gender_names = ['male', 'female', 'neutral']
                 pred_joints = []
                 prev_nbidx = 0
-                cat_idx_map = np.ones((B), dtype=np.int)*-1
+                cat_idx_map = np.ones((B), dtype=int)*-1
                 for gender_name in gender_names:
                     gender_idx = np.array(gender) == gender_name
                     nbidx = np.sum(gender_idx)
-                    cat_idx_map[gender_idx] = np.arange(prev_nbidx, prev_nbidx + nbidx, dtype=np.int)
+                    cat_idx_map[gender_idx] = np.arange(prev_nbidx, prev_nbidx + nbidx, dtype=int)
                     prev_nbidx += nbidx
 
                     gender_smpl_vals = [val[gender_idx] for val in smpl_vals]

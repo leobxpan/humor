@@ -43,7 +43,7 @@ def train(args_obj, config_file):
     Logger.log('Dataset args: ' + str(args_obj.dataset))
     Logger.log('Loss args: ' + str(args_obj.loss))
 
-    exp_name = "yi_humor_absolute_qual_walking_kl_4e-4"
+    exp_name = "public_humor_qual_walking"
     wandb.init(
         project="motion-field",
         entity="boxiaopan",
