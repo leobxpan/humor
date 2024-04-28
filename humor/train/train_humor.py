@@ -43,13 +43,13 @@ def train(args_obj, config_file):
     Logger.log('Dataset args: ' + str(args_obj.dataset))
     Logger.log('Loss args: ' + str(args_obj.loss))
 
-    exp_name = "public_humor_qual_walking"
-    wandb.init(
-        project="motion-field",
-        entity="boxiaopan",
-        name=exp_name,
-        sync_tensorboard=True,
-    )
+    exp_name = "humor_qual_walking_long"
+    # wandb.init(
+    #     project="motion-field",
+    #     entity="boxiaopan",
+    #     name=exp_name,
+    #     sync_tensorboard=True,
+    # )
 
     # save training script/model/dataset used
     train_scripts_path = os.path.join(args.out, 'train_scripts')
