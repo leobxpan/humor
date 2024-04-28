@@ -457,41 +457,48 @@ class YiHumorModel(nn.Module):
         decoder_in = torch.cat([past_in, z], axis=1)
         decoder_out = self.decoder(decoder_in).reshape((B, 1, -1))
 
-        if self.output_delta:
-            # network output is the residual, add to the input to get final output
-            step_in = past_in.reshape((B, self.steps_in, -1))[:,-1:,:] # most recent input step
+        #if self.output_delta:
+        # network output is the residual, add to the input to get final output
+        step_in = past_in.reshape((B, self.steps_in, -1))[:,-1:,:] # most recent input step
 
-            final_out_list = []
-            in_sidx = out_sidx = 0
-            decode_out_dim_list = self.output_dim_list
-            if self.pred_contacts:
-                decode_out_dim_list = decode_out_dim_list[:-1] # do contacts separately
-            for in_dim_idx, out_dim_idx, data_name in zip(self.input_dim_list, decode_out_dim_list, self.data_names):
-                in_eidx = in_sidx + in_dim_idx
-                out_eidx = out_sidx + out_dim_idx
+        final_out_list = []
+        in_sidx = out_sidx = 0
+        decode_out_dim_list = self.output_dim_list
+        if self.pred_contacts:
+            decode_out_dim_list = decode_out_dim_list[:-1] # do contacts separately
+        for in_dim_idx, out_dim_idx, data_name in zip(self.input_dim_list, decode_out_dim_list, self.data_names):
+            in_eidx = in_sidx + in_dim_idx
+            out_eidx = out_sidx + out_dim_idx
 
-                # add residual to input (and transform as necessary for rotations)
-                in_val = step_in[:,:,in_sidx:in_eidx]
-                out_val = decoder_out[:,:,out_sidx:out_eidx]
-                if data_name in ['root_orient', 'pose_body']:
-                    if self.in_rot_rep != 'mat':
-                        in_val = convert_to_rotmat(in_val, rep=self.in_rot_rep)
-                    out_val = convert_to_rotmat(out_val, rep=self.out_rot_rep)
+            # add residual to input (and transform as necessary for rotations)
+            in_val = step_in[:,:,in_sidx:in_eidx]
+            out_val = decoder_out[:,:,out_sidx:out_eidx]
+            if data_name == 'root_orient':
+                if self.in_rot_rep != 'mat':
+                    in_val = convert_to_rotmat(in_val, rep=self.in_rot_rep)
+                out_val = convert_to_rotmat(out_val, rep=self.out_rot_rep)
 
-                    in_val = in_val.reshape((B, 1, -1, 3, 3))
-                    out_val = out_val.reshape((B, self.steps_out, -1, 3, 3))
+                in_val = in_val.reshape((B, 1, -1, 3, 3))
+                out_val = out_val.reshape((B, self.steps_out, -1, 3, 3))
 
-                    rot_in = torch.matmul(out_val, in_val).reshape((B, self.steps_out, -1)) # rotate by predicted residual
-                    final_out_list.append(rot_in)
-                else:
-                    final_out_list.append(out_val + in_val)
+                rot_in = torch.matmul(out_val, in_val).reshape((B, self.steps_out, -1)) # rotate by predicted residual
+                final_out_list.append(rot_in)
+            elif data_name == "trans":
+                final_out_val = torch.zeros_like(out_val)
+                import pdb; pdb.set_trace()
+                final_out_val[..., :2] = out_val[..., :2] + in_val[..., :2]         # for x and y predictions, predict residuals
+                final_out_val[..., 2] = out_val[..., 2]                             # for z predictions, predict absolute values
+                final_out_list.append(final_out_val)
+            else:
+                # for other items, predict absolute values
+                final_out_list.append(out_val)
 
-                in_sidx = in_eidx
-                out_sidx = out_eidx
-            if self.pred_contacts:
-                final_out_list.append(decoder_out[:,:,out_sidx:])
+            in_sidx = in_eidx
+            out_sidx = out_eidx
+        if self.pred_contacts:
+            final_out_list.append(decoder_out[:,:,out_sidx:])
 
-            decoder_out = torch.cat(final_out_list, dim=2)
+        decoder_out = torch.cat(final_out_list, dim=2)
 
         decoder_out = decoder_out.reshape((B, -1))
 
