@@ -310,3 +310,34 @@ class HumorLossConfig(BaseSubConfig):
         self.parser.add_argument('--smpl-mesh-loss', type=float, default=1.0, help='Loss weight')
         self.parser.add_argument('--smpl-joint-consistency-loss', type=float, default=1.0, help='Loss weight')
         self.parser.add_argument('--smpl-vert-consistency-loss', type=float, default=0.0, help='Loss weight')
+
+class YiHumorLossConfig(BaseSubConfig):
+    '''
+    Configuration for arguments specific to losses.HumorLoss dataset class.
+    '''
+    def __init__(self, argv):
+        super().__init__(argv)
+
+        self.parser.add_argument('--kl-loss', type=float, default=0.0004, help='Loss weight')
+        self.parser.add_argument('--kl-loss-anneal-start', type=int, default=0, help='The epoch that the kl loss will start linearly increasing from 0.0')
+        self.parser.add_argument('--kl-loss-anneal-end', type=int, default=50, help='The epoch that the kl loss will reach its full weight')
+        self.parser.add_argument('--kl-loss-cycle-len', type=int, default=-1, help='If > 0, KL annealing will be done cyclicly and it will last this many epochs per cycle. If given will ignore kl-loss-anneal-start/end.')
+
+        self.parser.add_argument('--regr-trans-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-trans-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-root-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-pose-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-joint-orient-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--regr-vert-vel-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--contacts-loss', type=float, default=0.01, help='Loss weight')
+        self.parser.add_argument('--contacts-vel-loss', type=float, default=0.01, help='Loss weight')
+
+        self.parser.add_argument('--smpl-joint-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--smpl-mesh-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--smpl-joint-consistency-loss', type=float, default=1.0, help='Loss weight')
+        self.parser.add_argument('--smpl-vert-consistency-loss', type=float, default=0.0, help='Loss weight')
