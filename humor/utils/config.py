@@ -186,8 +186,6 @@ class YiHumorModelConfig(BaseSubConfig):
 
         self.parser.add_argument('--no-conditional-prior', dest='conditional_prior', action='store_false', help="Conditions the prior on the past input sequence.")
         self.parser.set_defaults(conditional_prior=True)
-        self.parser.add_argument('--no-output-delta', dest='output_delta', action='store_false', help="Each step predicts the residual rather than the next step.")
-        self.parser.set_defaults(output_delta=True)
 
         self.parser.add_argument('--posterior-arch', type=str, default='mlp', choices=['mlp'], help='')
         self.parser.add_argument('--decoder-arch', type=str, default='mlp', choices=['mlp'], help='')
@@ -200,9 +198,6 @@ class YiHumorModelConfig(BaseSubConfig):
 
         self.parser.add_argument('--model-use-smpl-joint-inputs', dest='model_use_smpl_joint_inputs', action='store_true', help="uses smpl joints rather than regressed joints to input at next step (during rollout and sched samp).")
         self.parser.set_defaults(model_use_smpl_joint_inputs=False)
-
-        self.parser.add_argument('--output-delta', dest='output_delta', action='store_true')
-        self.parser.set_defaults(output_delta=False)
 
 
 class HumorModelConfig(BaseSubConfig):
