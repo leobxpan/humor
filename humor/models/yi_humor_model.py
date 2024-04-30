@@ -106,11 +106,10 @@ class YiHumorModel(nn.Module):
                         latent_size=48,
                         steps_in=1,
                         conditional_prior=True, # use a learned prior rather than standard normal
-                        output_delta=False, # output change in state from decoder rather than next step directly
                         posterior_arch='mlp',
                         decoder_arch='mlp',
                         prior_arch='mlp',
-                        model_data_config='smpl+joints+contacts',
+                        model_data_config='smpl+joints',
                         detach_sched_samp=True, # if true, detaches outputs of previous step so gradients don't flow through many steps
                         model_use_smpl_joint_inputs=False, # if true, uses smpl joints rather than regressed joints to input at next step (during rollout and sched samp)
                         model_smpl_batch_size=1 # if using smpl joint inputs this should be batch_size of the smpl model (aka data input to rollout)
@@ -122,7 +121,6 @@ class YiHumorModel(nn.Module):
         self.steps_out = 1
         self.out_step_size = 1
         self.detach_sched_samp = detach_sched_samp
-        self.output_delta = output_delta
 
         if self.steps_out > 1:
             raise NotImplementedError('Only supported single step output currently.')
@@ -162,12 +160,6 @@ class YiHumorModel(nn.Module):
 
         self.output_rot_dim = ROT_REP_SIZE[self.out_rot_rep]
         self.output_dim_list = [data_dim(dname, rot_rep_size=self.output_rot_dim) for dname in self.data_names]
-        self.delta_output_dim_list = [data_dim(dname, rot_rep_size=ROT_REP_SIZE['mat']) for dname in self.data_names]
-
-        if self.pred_contacts:
-            # account for contact classification output
-            self.output_dim_list.append(data_dim('contacts'))
-            self.delta_output_dim_list.append(data_dim('contacts'))
 
         self.output_data_dim = sum(self.output_dim_list)
 
@@ -331,7 +323,7 @@ class YiHumorModel(nn.Module):
         name_list = self.data_names
         if self.aux_out_data_names is not None:
             name_list = name_list + self.aux_out_data_names
-        idx_list = self.delta_output_dim_list if self.output_delta else self.output_dim_list
+        idx_list = self.output_dim_list
         out_dict = dict()
         sidx = 0
         for cur_name, cur_idx in zip(name_list, idx_list):
@@ -340,7 +332,7 @@ class YiHumorModel(nn.Module):
             sidx = eidx
 
         # transform rotations
-        if convert_rots and not self.output_delta: # output delta already gives rotmats
+        if convert_rots:
             if 'root_orient' in self.data_names:
                 out_dict['root_orient'] = convert_to_rotmat(out_dict['root_orient'], rep=self.out_rot_rep)
             if 'pose_body' in self.data_names:
@@ -482,10 +474,14 @@ class YiHumorModel(nn.Module):
                 out_val = out_val.reshape((B, self.steps_out, -1, 3, 3))
 
                 rot_in = torch.matmul(out_val, in_val).reshape((B, self.steps_out, -1)) # rotate by predicted residual
+                if self.out_rot_rep == 'aa':
+                    rot_in = rotation_matrix_to_angle_axis(rot_in.reshape((B, 3, 3))).reshape((B, self.steps_out, 3))
+                else:
+                    raise ValueError("out rot rep {} unsupported".format(self.out_rot_rep))
+
                 final_out_list.append(rot_in)
             elif data_name == "trans":
                 final_out_val = torch.zeros_like(out_val)
-                import pdb; pdb.set_trace()
                 final_out_val[..., :2] = out_val[..., :2] + in_val[..., :2]         # for x and y predictions, predict residuals
                 final_out_val[..., 2] = out_val[..., 2]                             # for z predictions, predict absolute values
                 final_out_list.append(final_out_val)
